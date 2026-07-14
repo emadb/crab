@@ -15,12 +15,12 @@ pub struct Message {
 }
 
 impl Message {
-    pub fn system(content: impl Into<String>) -> Self {
-        Self {
-            role: Role::System,
-            content: content.into(),
-        }
-    }
+    // pub fn system(content: impl Into<String>) -> Self {
+    //     Self {
+    //         role: Role::System,
+    //         content: content.into(),
+    //     }
+    // }
 
     pub fn user(content: impl Into<String>) -> Self {
         Self {

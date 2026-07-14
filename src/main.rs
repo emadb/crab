@@ -1,75 +1,54 @@
+mod api_client;
 mod message;
 
-use anyhow::Result;
-use rustyline::{DefaultEditor};
-use serde::{Deserialize, Serialize};
+use std::process::exit;
+
+use crate::{api_client::send_message, message::Message};
+use anyhow::{Error, Result};
+use rustyline::DefaultEditor;
 
 #[tokio::main]
 async fn main() -> Result<()> {
     println!("I'm crab!");
     let mut rl = DefaultEditor::new()?;
+    let mut history: Vec<Message> = vec![];
     loop {
-
         let readline = rl.readline("> ");
         match readline {
             Ok(line) => {
-                let res = send_message(line).await;
-                println!("{}\n", res.unwrap());
-            },
+                manage_line(line, &mut history).await;
+            }
             _ => {
                 println!("Bye");
-                break
-             }
+                break;
+            }
         }
     }
     Ok(())
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Message {
-    role: String,
-    content: String
+async fn manage_line(line: String, history: &mut Vec<Message>) {
+    match line.as_str() {
+        "/clear" => {
+            history.clear();
+        }
+        "/quit" => {
+            exit(0);
+        }
+        line => {
+            history.push(message::Message::user(line));
+            let res = send_message(history).await;
+            manage_response(res, history);
+        }
+    }
 }
 
-#[derive(Debug, Serialize)]
-struct ChatRequest {
-    model: String,
-    messages: Vec<Message>,
-}
-
-#[derive(Debug, Deserialize)]
-struct Choice {
-    message: Message
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatResponse {
-    choices: Vec<Choice>,
-}
-
-
-async fn send_message(line: String) -> Result<String> {
-    let client = reqwest::Client::new();
-    let base_url = "http://localhost:8080/v1";
-    let url = format!("{}/chat/completions", base_url);
-    let msg = Message{ role: "user".to_string(), content: line};
-    let response = client
-            .post(&url)
-            // .bearer_auth(api_key)
-            .json(&ChatRequest { model: "gemma4".to_string(), messages: vec![msg] })
-            .send()
-            .await?;
-
-    // let status = response.status();
-    let body = response
-        .text()
-        .await;
-
-    match body {
-        Ok(content) => {
-            let parsed: ChatResponse = serde_json::from_str(&content)?;
-            Ok(parsed.choices[0].message.content.clone())
-        },
-        Err(e) => Err(e.into())
+fn manage_response(content: Result<String, Error>, history: &mut Vec<Message>) {
+    match content {
+        Ok(line) => {
+            history.push(message::Message::assistant(line.clone()));
+            println!("{}\n", line)
+        }
+        Err(e) => println!("ERROR: {:?}", e),
     }
 }
