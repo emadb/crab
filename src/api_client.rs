@@ -1,4 +1,4 @@
-use crate::message::Message;
+use crate::{LlmConfig, message::Message};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -18,16 +18,15 @@ struct ChatResponse {
     choices: Vec<Choice>,
 }
 
-pub async fn send_message(history: &Vec<Message>) -> Result<String> {
+pub async fn send_message(history: &[Message], llm_config: &LlmConfig) -> Result<String> {
     let client = reqwest::Client::new();
-    let base_url = "http://localhost:8080/v1";
-    let url = format!("{}/chat/completions", base_url);
+    let url = format!("{}/chat/completions", llm_config.base_url);
 
     let response = client
         .post(&url)
         // .bearer_auth(api_key)
         .json(&ChatRequest {
-            model: "gemma4".to_string(),
+            model: llm_config.model.to_string(),
             messages: history.to_vec(),
         })
         .send()
