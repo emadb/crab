@@ -26,9 +26,9 @@ struct LlmConfig {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    let llm_config = LlmConfig{
+    let llm_config = LlmConfig {
         base_url: cli.base_url,
-        model: cli.model
+        model: cli.model,
     };
 
     println!("I'm crab!");
@@ -40,13 +40,7 @@ async fn main() -> Result<()> {
         let readline = rl.readline("> ");
         match readline {
             Ok(line) => {
-                manage_line(
-                    line,
-                    &mut history,
-                    &llm_config,
-                    &add_system_prompt,
-                )
-                .await;
+                manage_line(line, &mut history, &llm_config, &add_system_prompt).await;
             }
             _ => {
                 println!("Bye");
@@ -90,8 +84,9 @@ async fn manage_line(
 fn manage_response(content: Result<String, Error>, history: &mut Vec<Message>) {
     match content {
         Ok(line) => {
-            history.push(Message::assistant(line.clone()));
-            println!("{}\n", line)
+            history.push(Message::assistant(line));
+            // i token sono già stati stampati in streaming, chiudiamo solo la riga
+            println!("\n")
         }
         Err(e) => println!("ERROR: {:?}", e),
     }
