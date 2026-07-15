@@ -2,7 +2,6 @@ mod api_client;
 mod message;
 
 use std::process::exit;
-
 use crate::{api_client::send_message, message::Message};
 use anyhow::{Error, Result};
 use clap::Parser;

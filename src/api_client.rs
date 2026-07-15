@@ -1,5 +1,4 @@
 use std::io::Write;
-
 use crate::{LlmConfig, message::Message};
 use anyhow::{Result, bail};
 use futures_util::{Stream, TryStreamExt, future, stream};
@@ -50,7 +49,7 @@ pub async fn send_message(history: &[Message], llm_config: &LlmConfig) -> Result
     }
 
     let mut events = sse_events(response.bytes_stream());
-    let mut full = String::new();
+    let mut full_response = String::new();
     let mut stdout = std::io::stdout();
 
     while let Some(data) = events.try_next().await? {
@@ -62,11 +61,11 @@ pub async fn send_message(history: &[Message], llm_config: &LlmConfig) -> Result
         {
             print!("{token}");
             stdout.flush()?;
-            full.push_str(token);
+            full_response.push_str(token);
         }
     }
 
-    Ok(full)
+    Ok(full_response)
 }
 
 /// Trasforma lo stream di byte HTTP in uno stream di payload `data:`,
