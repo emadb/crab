@@ -9,7 +9,7 @@ use anyhow::Result;
 use clap::Parser;
 use futures_util::TryStreamExt;
 use rustyline::DefaultEditor;
-use std::{io::Write, process::exit, time::Duration};
+use std::{io::Write, process::exit};
 
 #[derive(clap::Parser)]
 struct Cli {
@@ -26,8 +26,6 @@ struct LlmConfig {
     model: String,
 }
 
-const MAX_RETRIES: u32 = 3;
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -38,9 +36,7 @@ async fn main() -> Result<()> {
 
     println!("I'm crab!");
     let mut rl = DefaultEditor::new()?;
-    let mut history: Vec<Message> = vec![];
-    let add_system_prompt = add_system_prompt(cli.system.clone());
-    add_system_prompt(&mut history);
+    let mut history = initial_history(&cli.system);
 
     let client: Box<dyn LlmClient> =
         Box::new(ChatServer::new(llm_config.base_url, llm_config.model));
@@ -49,7 +45,7 @@ async fn main() -> Result<()> {
         let readline = rl.readline("> ");
         match readline {
             Ok(line) => {
-                send_prompt(line, &mut history, client.as_ref(), &add_system_prompt).await;
+                send_prompt(line, &mut history, client.as_ref(), &cli.system).await;
             }
             _ => {
                 println!("Bye");
@@ -60,11 +56,10 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-fn add_system_prompt(system: Option<String>) -> impl Fn(&mut Vec<Message>) {
-    move |h| {
-        if let Some(system) = &system {
-            h.push(Message::system(system.clone()));
-        }
+fn initial_history(system: &Option<String>) -> Vec<Message> {
+    match system {
+        Some(s) => vec![Message::system(s.clone())],
+        None => vec![],
     }
 }
 
@@ -72,12 +67,11 @@ async fn send_prompt(
     line: String,
     history: &mut Vec<Message>,
     client: &dyn LlmClient,
-    add_system_prompt: &impl Fn(&mut Vec<Message>),
+    system: &Option<String>,
 ) {
     match line.as_str() {
         "/clear" => {
-            history.clear();
-            add_system_prompt(history);
+            *history = initial_history(system);
         }
         "/quit" => {
             exit(0);
@@ -90,23 +84,9 @@ async fn send_prompt(
     }
 }
 
-/// Apre lo stream con retry + backoff esponenziale sugli errori retryable,
-/// poi lo consuma. Un errore a stream già iniziato risale senza retry.
+/// Apre lo stream e lo consuma; lo stream finisce da solo al `[DONE]`.
 async fn chat_turn(client: &dyn LlmClient, history: &[Message]) -> Result<String, LlmError> {
-    let mut attempt = 0u32;
-    let stream = loop {
-        match client.send_message(history).await {
-            Err(e) if e.is_retryable() && attempt < MAX_RETRIES => {
-                let delay = e
-                    .retry_after()
-                    .unwrap_or_else(|| Duration::from_millis(500 * 2u64.pow(attempt)));
-                eprintln!("[{e} — riprovo tra {}ms]", delay.as_millis());
-                tokio::time::sleep(delay).await;
-                attempt += 1;
-            }
-            other => break other?,
-        }
-    };
+    let stream = client.send_message(history).await?;
     consume_stream(stream).await
 }
 
@@ -114,15 +94,10 @@ async fn consume_stream(mut stream: ChatStream) -> Result<String, LlmError> {
     let mut full_response = String::new();
     let mut stdout = std::io::stdout();
     while let Some(event) = stream.try_next().await? {
-        match event {
-            StreamEvent::TextDelta(token) => {
-                print!("{token}");
-                let _ = stdout.flush();
-                full_response.push_str(&token);
-            }
-            StreamEvent::Usage { .. } => {} // step 8: alimenterà l'indicatore [ctx: N%]
-            StreamEvent::Done => break,
-        }
+        let StreamEvent::TextDelta(token) = event;
+        print!("{token}");
+        let _ = stdout.flush();
+        full_response.push_str(&token);
     }
     Ok(full_response)
 }

@@ -1,19 +1,12 @@
 use crate::message::Message;
-use futures_util::{Stream, StreamExt, TryStreamExt, future, stream};
+use futures_util::{Stream, TryStreamExt, future, stream};
 use serde::{Deserialize, Serialize};
-use std::{pin::Pin, time::Duration};
+use std::pin::Pin;
 
 pub enum StreamEvent {
     TextDelta(String),
     // step 4: ToolCallDelta { index: usize, id: Option<String>, name: Option<String>, arguments: String },
-    // i campi verranno letti allo step 8 (context management)
-    Usage {
-        #[allow(dead_code)]
-        prompt_tokens: u32,
-        #[allow(dead_code)]
-        completion_tokens: u32,
-    },
-    Done,
+    // step 8: Usage { prompt_tokens: u32, completion_tokens: u32 },
 }
 
 pub type ChatStream = Pin<Box<dyn Stream<Item = Result<StreamEvent, LlmError>> + Send>>;
@@ -25,38 +18,12 @@ pub trait LlmClient: Send + Sync {
 
 #[derive(thiserror::Error, Debug)]
 pub enum LlmError {
-    #[error("rate limit (429)")]
-    RateLimited { retry_after: Option<Duration> },
-    #[error("autenticazione: {0}")]
-    Auth(String),
-    #[error("errore API {status}: {body}")]
+    #[error("API error {status}: {body}")]
     Api { status: u16, body: String },
-    #[error("rete: {0}")]
+    #[error("network: {0}")]
     Network(#[from] reqwest::Error),
-    #[error("risposta malformata: {0}")]
+    #[error("malformed response: {0}")]
     Parse(#[from] serde_json::Error),
-}
-
-impl LlmError {
-    pub fn is_retryable(&self) -> bool {
-        match self {
-            LlmError::RateLimited { .. } | LlmError::Network(_) => true,
-            LlmError::Api { status, .. } => (500..600).contains(status),
-            LlmError::Auth(_) | LlmError::Parse(_) => false,
-        }
-    }
-
-    pub fn retry_after(&self) -> Option<Duration> {
-        match self {
-            LlmError::RateLimited { retry_after } => *retry_after,
-            _ => None,
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct StreamOptions {
-    include_usage: bool,
 }
 
 #[derive(Serialize)]
@@ -64,7 +31,6 @@ struct ChatRequest {
     model: String,
     messages: Vec<Message>,
     stream: bool,
-    stream_options: StreamOptions,
 }
 
 #[derive(Deserialize)]
@@ -79,16 +45,8 @@ struct ChunkChoice {
 }
 
 #[derive(Deserialize)]
-struct UsageInfo {
-    prompt_tokens: u32,
-    completion_tokens: u32,
-}
-
-#[derive(Deserialize)]
 struct ChunkResponse {
-    #[serde(default)]
     choices: Vec<ChunkChoice>,
-    usage: Option<UsageInfo>,
 }
 
 pub struct ChatServer {
@@ -120,9 +78,6 @@ impl LlmClient for ChatServer {
                 model: self.model.to_string(),
                 messages: history.to_vec(),
                 stream: true,
-                stream_options: StreamOptions {
-                    include_usage: true,
-                },
             })
             .send()
             .await?;
@@ -130,25 +85,21 @@ impl LlmClient for ChatServer {
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            return Err(LlmError::Api { status: status.as_u16(), body });
+            return Err(LlmError::Api {
+                status: status.as_u16(),
+                body,
+            });
         }
 
         let events = sse_events(response.bytes_stream())
-            .try_filter_map(|data| future::ready(parse_chunk(&data)))
-            .chain(stream::once(future::ready(Ok(StreamEvent::Done))));
+            .try_filter_map(|data| future::ready(parse_chunk(&data)));
         Ok(Box::pin(events))
     }
 }
 
-/// Un payload `data:` → al più uno StreamEvent (testo o usage).
+/// Un payload `data:` → al più uno StreamEvent (i chunk senza testo vengono scartati).
 fn parse_chunk(data: &str) -> Result<Option<StreamEvent>, LlmError> {
     let parsed: ChunkResponse = serde_json::from_str(data)?;
-    if let Some(usage) = parsed.usage {
-        return Ok(Some(StreamEvent::Usage {
-            prompt_tokens: usage.prompt_tokens,
-            completion_tokens: usage.completion_tokens,
-        }));
-    }
     Ok(parsed
         .choices
         .into_iter()
