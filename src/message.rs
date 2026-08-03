@@ -1,38 +1,33 @@
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Role {
-    System,
-    User,
-    Assistant,
+#[derive(Debug, Clone)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Message {
-    pub role: Role,
+#[derive(Debug, Clone)]
+pub struct ToolResult {
     pub content: String,
+    pub is_error: bool,
 }
 
-impl Message {
-    pub fn system(content: impl Into<String>) -> Self {
-        Self {
-            role: Role::System,
-            content: content.into(),
-        }
-    }
+#[derive(Debug, Clone)]
+pub enum AssistantTurn {
+    Completed { text: String },
+    ToolCalls { text: String, calls: Vec<ToolCall> },
+    Truncated { text: String },
+}
 
-    pub fn user(content: impl Into<String>) -> Self {
-        Self {
-            role: Role::User,
-            content: content.into(),
-        }
-    }
-
-    pub fn assistant(content: impl Into<String>) -> Self {
-        Self {
-            role: Role::Assistant,
-            content: content.into(),
-        }
-    }
+#[derive(Debug, Clone)]
+pub enum Message {
+    System(String),
+    User(String),
+    Assistant {
+        text: String,
+        tool_calls: Vec<ToolCall>,
+    },
+    Tool {
+        call_id: String,
+        result: ToolResult,
+    },
 }
