@@ -40,7 +40,6 @@ impl Tool for Ls {
         serde_json::to_value(schemars::schema_for!(LsArgs)).unwrap()
     }
 
-    // TODO: fs::read_dir blocks the Tokio worker; move to spawn_blocking per docs/architecture.md.
     async fn execute(&self, args: serde_json::Value) -> Result<String, ToolError> {
         let args: LsArgs = serde_json::from_value(args).map_err(|e| ToolError(e.to_string()))?;
 

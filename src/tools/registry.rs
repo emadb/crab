@@ -15,7 +15,6 @@ impl ToolRegistry {
         self.tools.insert(tool.name().to_string(), tool);
     }
 
-    /// Provider-neutral tool catalogue for the current turn.
     pub fn specs(&self) -> Vec<ToolSpec> {
         self.tools
             .values()

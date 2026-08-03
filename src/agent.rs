@@ -33,10 +33,7 @@ impl Agent {
 
         for _ in 0..self.max_iterations {
             let specs = self.tools.specs();
-            let messages = match conversation.messages() {
-                Ok(messages) => messages,
-                Err(e) => return Err(e.into()),
-            };
+            let messages = conversation.messages.as_slice();
             let request = TurnRequest {
                 messages,
                 tools: &specs,
@@ -55,14 +52,10 @@ impl Agent {
                 Err(e) => return Err(e.into()),
             };
 
-            let truncated = matches!(turn, AssistantTurn::Truncated { .. });
             let completed = matches!(turn, AssistantTurn::Completed { .. });
 
             let pending = conversation.push_assistant(turn);
 
-            if truncated {
-                return Err(AgentError::Truncated);
-            }
             if completed {
                 self.ui.emit(AgentEvent::TurnEnded);
                 return Ok(());

@@ -2,8 +2,7 @@ use crate::message::{AssistantTurn, Message, ToolResult};
 
 pub struct Conversation {
     system: Option<String>,
-    messages: Vec<Message>,
-    pending: Vec<String>,
+    pub messages: Vec<Message>,
 }
 
 pub struct PendingCall {
@@ -11,8 +10,6 @@ pub struct PendingCall {
     name: String,
     arguments: String,
 }
-
-pub struct Unresolved;
 
 impl PendingCall {
     pub fn name(&self) -> &str {
@@ -30,11 +27,7 @@ impl Conversation {
             .clone()
             .map(|s| vec![Message::System(s)])
             .unwrap_or_default();
-        Self {
-            system,
-            messages,
-            pending: Vec::new(),
-        }
+        Self { system, messages }
     }
 
     pub fn push_user(&mut self, text: impl Into<String>) {
@@ -44,7 +37,7 @@ impl Conversation {
     #[must_use]
     pub fn push_assistant(&mut self, turn: AssistantTurn) -> Vec<PendingCall> {
         match turn {
-            AssistantTurn::Completed { text } | AssistantTurn::Truncated { text } => {
+            AssistantTurn::Completed { text } => {
                 self.messages.push(Message::Assistant {
                     text,
                     tool_calls: Vec::new(),
@@ -60,7 +53,6 @@ impl Conversation {
                         arguments: c.arguments.clone(),
                     })
                     .collect();
-                self.pending = pending.iter().map(|p| p.id.clone()).collect();
                 self.messages.push(Message::Assistant {
                     text,
                     tool_calls: calls,
@@ -71,21 +63,10 @@ impl Conversation {
     }
 
     pub fn resolve(&mut self, call: PendingCall, result: ToolResult) {
-        if let Some(pos) = self.pending.iter().position(|id| id == &call.id) {
-            self.pending.remove(pos);
-        }
         self.messages.push(Message::Tool {
             call_id: call.id,
             result,
         });
-    }
-
-    pub fn messages(&self) -> Result<&[Message], Unresolved> {
-        if self.pending.is_empty() {
-            Ok(&self.messages)
-        } else {
-            Err(Unresolved)
-        }
     }
 
     pub fn reset(&mut self) {

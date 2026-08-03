@@ -15,7 +15,6 @@ pub struct ToolResult {
 pub enum AssistantTurn {
     Completed { text: String },
     ToolCalls { text: String, calls: Vec<ToolCall> },
-    Truncated { text: String },
 }
 
 #[derive(Debug, Clone)]
