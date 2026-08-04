@@ -20,7 +20,7 @@ struct Cli {
     base_url: String,
     #[arg(long, default_value = "phi3")]
     model: String,
-    #[arg(long)]
+    #[arg(long, default_value = "You are a coding agent specialized in writing clean and simple code. You have three tools: `ls` to list the content of a specific folder, `read_file` to read the content of a file and `grep` to search a pattern inside a file. Explore the content of the folder and think before sending a response to the user. If you need more details about a particular topic, ask the user, don't invent answers or take a decision without having all the informations")]
     system: Option<String>,
 }
 

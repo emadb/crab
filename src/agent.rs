@@ -20,7 +20,7 @@ impl Agent {
             llm,
             tools,
             ui,
-            max_iterations: 10,
+            max_iterations: 30,
         }
     }
 
