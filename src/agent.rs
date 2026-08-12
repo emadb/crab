@@ -1,3 +1,5 @@
+use serde_json::json;
+
 use crate::{
     context::Conversation,
     error::AgentError,
@@ -62,6 +64,9 @@ impl Agent {
             }
 
             for call in pending {
+                let args = serde_json::from_str(call.arguments());
+                let args = args.map_or(json!({"error": "Error parsing the arguments."}), |a| { a });
+                self.ui.emit(AgentEvent::ToolExecutionStarted { name: String::from(call.name()), arguments: args });
                 let result = self.execute(call.name(), call.arguments()).await;
                 self.ui.emit(AgentEvent::ToolFinished {
                     name: call.name().to_string(),

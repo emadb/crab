@@ -7,6 +7,11 @@ pub enum AgentEvent {
     ToolStarted {
         name: String,
     },
+    ToolExecutionStarted {
+        name: String,
+        arguments: serde_json::Value,
+    },
+
     ToolFinished {
         name: String,
         result: ToolResult,

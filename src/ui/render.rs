@@ -11,6 +11,9 @@ impl Ui for StdoutUi {
                 let _ = std::io::stdout().flush();
             }
             AgentEvent::ToolStarted { name } => println!("\n[tool] {name}..."),
+            AgentEvent::ToolExecutionStarted { name, arguments } => {
+                println!("[tool] {name} {arguments}");
+            }
             AgentEvent::ToolFinished { name, result } => {
                 if result.is_error {
                     println!("[tool] {name} failed: {}", result.content);

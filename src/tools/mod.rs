@@ -3,6 +3,7 @@ use async_trait::async_trait;
 pub mod ls;
 pub mod read_file;
 pub mod grep;
+pub mod write_file;
 pub mod registry;
 
 #[derive(thiserror::Error, Debug)]
