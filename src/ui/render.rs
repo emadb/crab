@@ -1,5 +1,5 @@
 use crate::ui::{AgentEvent, Ui};
-use std::io::Write;
+use std::io::{Read, Write};
 
 pub struct StdoutUi;
 
@@ -24,5 +24,12 @@ impl Ui for StdoutUi {
             AgentEvent::TurnEnded => println!(),
             AgentEvent::Error(err) => eprintln!("error: {err}"),
         }
+    }
+    fn ask_permission(&self) -> bool {
+        println!("Proceed with tool execution? [y/N]");
+
+        let mut s = [0_u8];
+        let _ = std::io::stdin().read_exact(&mut s).unwrap();
+        s == [121]
     }
 }

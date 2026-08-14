@@ -26,4 +26,5 @@ pub enum AgentEvent {
 
 pub trait Ui: Send + Sync {
     fn emit(&self, event: AgentEvent);
+    fn ask_permission(&self) -> bool;
 }
