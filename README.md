@@ -45,4 +45,4 @@ cargo run -- --base-url <YOUR_BASE_URL> --model <YOUR_MODEL_NAME> --system \"<YO
 
 Inside the Crab CLI, you can use the following commands:
 - `/clear`: Clears the current conversation context.
-- `/quit`: Exits the application.\n
+- `/quit`: Exits the application.

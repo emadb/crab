@@ -52,7 +52,10 @@ impl Tool for WriteFile {
         }
 
         let mut file = file.unwrap();
-        let _ = file.write_all(args.content.as_bytes());
+        let ee = file.write_all(args.content.as_bytes());
+        if ee.is_err() {
+            println!("ERROR: {:?}", ee)
+        }
         let _ = file.flush();
 
 
@@ -64,6 +67,8 @@ fn open_or_create_file(target: PathBuf, file: String) -> Result<File, std::io::E
     if !target.exists() {
         File::create(file)
     } else {
-        File::open(file)
+        File::options()
+            .append(true)
+            .open(file)
     }
 }
