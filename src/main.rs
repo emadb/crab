@@ -7,7 +7,7 @@ mod tools;
 mod ui;
 
 use crate::{
-    agent::Agent, context::Conversation, provider::openai::OpenAiClient, tools::{grep::Grep, ls::Ls, read_file::ReadFile, registry::ToolRegistry, write_file::WriteFile}, ui::render::StdoutUi,
+    agent::Agent, context::Conversation, provider::openai::OpenAiClient, tools::{grep::Grep, ls::Ls, read_file::ReadFile, registry::ToolRegistry, shell_command::ShellCommand, write_file::WriteFile}, ui::render::StdoutUi,
 };
 use anyhow::Result;
 use clap::Parser;
@@ -33,6 +33,7 @@ async fn main() -> Result<()> {
     tools.register(Box::new(ReadFile::new(std::env::current_dir()?)));
     tools.register(Box::new(Grep::new()));
     tools.register(Box::new(WriteFile::new(std::env::current_dir()?)));
+    tools.register(Box::new(ShellCommand::new()));
 
     let llm = Box::new(OpenAiClient::new(cli.base_url, cli.model));
     let ui = Box::new(StdoutUi);

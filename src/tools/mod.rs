@@ -4,11 +4,18 @@ pub mod ls;
 pub mod read_file;
 pub mod grep;
 pub mod write_file;
+pub mod shell_command;
 pub mod registry;
 
 #[derive(thiserror::Error, Debug)]
 #[error("tool error: {0}")]
 pub struct ToolError(pub String);
+
+impl From<std::io::Error> for ToolError {
+    fn from(value: std::io::Error) -> Self {
+    ToolError(value.to_string())
+    }
+}
 
 pub struct ToolSpec {
     pub name: String,
