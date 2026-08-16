@@ -5,6 +5,7 @@ pub mod read_file;
 pub mod grep;
 pub mod write_file;
 pub mod shell_command;
+pub mod edit_file;
 pub mod registry;
 
 #[derive(thiserror::Error, Debug)]
