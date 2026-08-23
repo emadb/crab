@@ -1,5 +1,6 @@
 use crate::{conversation_entry::ConversationEntry, message::{AssistantTurn, ToolResult}};
 
+#[derive(Debug)]
 pub struct Conversation {
     system: Option<String>,
     pub messages: Vec<ConversationEntry>,
@@ -35,12 +36,19 @@ impl Conversation {
     #[must_use]
     pub fn push_assistant(&mut self, turn: AssistantTurn) -> Vec<PendingCall> {
         match turn {
-            AssistantTurn::Completed { text, tokens } => {
-                let ce = ConversationEntry::agent(text, Vec::new(), tokens);
+            AssistantTurn::Completed { text, prompt_tokens, completion_tokens } => {
+                let last = self.messages.last_mut();
+                if let Some(m) = last { m.tokens = prompt_tokens }
+
+                let ce = ConversationEntry::agent(text, Vec::new(), completion_tokens);
                 self.messages.push(ce);
+
                 Vec::new()
             }
-            AssistantTurn::ToolCalls { text, calls, tokens } => {
+            AssistantTurn::ToolCalls { text, calls, prompt_tokens, completion_tokens } => {
+                let last = self.messages.last_mut();
+                if let Some(m) = last { m.tokens = prompt_tokens }
+
                 let pending: Vec<PendingCall> = calls
                     .iter()
                     .map(|c| PendingCall {
@@ -50,7 +58,7 @@ impl Conversation {
                     })
                     .collect();
 
-                let ce = ConversationEntry::agent(text.clone(), calls, tokens);
+                let ce = ConversationEntry::agent(text.clone(), calls, completion_tokens);
                 self.messages.push(ce);
                 pending
             }

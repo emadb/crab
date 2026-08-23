@@ -184,10 +184,21 @@ impl LlmClient for OpenAiClient {
             }
         }
 
+        println!("PROMPT: {}", usage.prompt_tokens);
+        println!("COMPLE: {}", usage.completion_tokens);
+
         Ok(if calls.is_empty() {
-            AssistantTurn::Completed { text, tokens: usage.total_tokens }
+            AssistantTurn::Completed {
+                text,
+                prompt_tokens: usage.prompt_tokens,
+                completion_tokens: usage.completion_tokens
+            }
         } else {
-            AssistantTurn::ToolCalls { text, calls, tokens: usage.total_tokens }
+            AssistantTurn::ToolCalls {
+                text, calls,
+                prompt_tokens: usage.prompt_tokens,
+                completion_tokens: usage.completion_tokens
+            }
         })
     }
 }

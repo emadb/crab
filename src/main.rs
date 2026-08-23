@@ -69,6 +69,9 @@ async fn main() -> Result<()> {
                     if let Err(e) = agent.run_turn(&mut conversation, line).await {
                         eprintln!("error: {e}");
                     }
+                    for c in &conversation.messages {
+                        println!("- {:?}", c)
+                    }
                 }
             },
             _ => {

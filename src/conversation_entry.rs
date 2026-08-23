@@ -1,5 +1,6 @@
 use crate::message::{Message, ToolCall, ToolResult};
 
+#[derive(Debug)]
 pub struct ConversationEntry {
     pub message: Message,
     pub tokens: usize,
@@ -45,7 +46,7 @@ impl ConversationEntry {
         }
     }
 }
-
+#[derive(Debug)]
 pub enum Origin {
     SystemPrompt,
     UserInput,
