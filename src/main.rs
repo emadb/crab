@@ -1,6 +1,7 @@
 mod agent;
 mod context;
 mod error;
+mod conversation_entry;
 mod message;
 mod provider;
 mod tools;

@@ -2,12 +2,11 @@ pub mod openai;
 pub mod sse;
 
 use crate::{
-    message::{AssistantTurn, Message},
-    tools::ToolSpec,
+    conversation_entry::ConversationEntry, message::{AssistantTurn, Message}, tools::ToolSpec,
 };
 
 pub struct TurnRequest<'a> {
-    pub messages: &'a [Message],
+    pub messages: &'a [ConversationEntry],
     pub tools: &'a [ToolSpec],
 }
 

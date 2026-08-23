@@ -7,11 +7,18 @@ use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
+struct StreamOptions {
+    include_usage: bool,
+}
+
+#[derive(Serialize)]
 struct ChatRequest {
     model: String,
     messages: Vec<MessageReq>,
     stream: bool,
     tools: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    stream_options: Option<StreamOptions>,
 }
 
 #[derive(Serialize)]
@@ -39,34 +46,42 @@ struct WireFunction {
     arguments: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct DeltaChunk {
     content: Option<String>,
     tool_calls: Option<Vec<ToolCallChunk>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct ToolCallChunk {
     index: usize,
     id: Option<String>,
     function: Option<FunctionChunk>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct FunctionChunk {
     name: Option<String>,
     #[serde(default)]
     arguments: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct ChunkChoice {
     delta: DeltaChunk,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct ChunkResponse {
     choices: Vec<ChunkChoice>,
+    usage: Option<UsageInfo>,
+}
+
+#[derive(serde::Deserialize, Debug)]
+pub struct UsageInfo {
+    pub prompt_tokens: usize,
+    pub completion_tokens: usize,
+    pub total_tokens: usize,
 }
 
 pub struct OpenAiClient {
@@ -100,15 +115,15 @@ impl LlmClient for OpenAiClient {
             .post(&url)
             .json(&ChatRequest {
                 model: self.model.clone(),
-                messages: req.messages.iter().map(build_message).collect(),
+                messages: req.messages.iter().map(|m| build_message(&m.message)).collect(),
                 stream: true,
                 tools: tools_json(req.tools),
+                stream_options: Some(StreamOptions { include_usage: true }),
             });
 
         if let Some(key) = &self.api_key {
             request = request.bearer_auth(key);
         }
-
 
         let response = request
             .send()
@@ -126,9 +141,15 @@ impl LlmClient for OpenAiClient {
         let mut events = Box::pin(sse_events(response.bytes_stream()));
         let mut text = String::new();
         let mut calls: Vec<ToolCall> = Vec::new();
+        let mut usage: UsageInfo =  UsageInfo { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
 
         while let Some(data) = events.try_next().await? {
             let parsed: ChunkResponse = serde_json::from_str(&data)?;
+
+            if let Some(u) = parsed.usage {
+                usage = u;
+            }
+
             let Some(choice) = parsed.choices.into_iter().next() else {
                 continue;
             };
@@ -164,9 +185,9 @@ impl LlmClient for OpenAiClient {
         }
 
         Ok(if calls.is_empty() {
-            AssistantTurn::Completed { text }
+            AssistantTurn::Completed { text, tokens: usage.total_tokens }
         } else {
-            AssistantTurn::ToolCalls { text, calls }
+            AssistantTurn::ToolCalls { text, calls, tokens: usage.total_tokens }
         })
     }
 }

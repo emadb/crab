@@ -1,8 +1,8 @@
-use crate::message::{AssistantTurn, Message, ToolResult};
+use crate::{conversation_entry::ConversationEntry, message::{AssistantTurn, ToolResult}};
 
 pub struct Conversation {
     system: Option<String>,
-    pub messages: Vec<Message>,
+    pub messages: Vec<ConversationEntry>,
 }
 
 pub struct PendingCall {
@@ -23,28 +23,24 @@ impl PendingCall {
 
 impl Conversation {
     pub fn new(system: Option<String>) -> Self {
-        let messages = system
-            .clone()
-            .map(|s| vec![Message::System(s)])
-            .unwrap_or_default();
-        Self { system, messages }
+        let message = ConversationEntry::system(system.clone());
+        Self { system, messages: vec![message] }
     }
 
     pub fn push_user(&mut self, text: impl Into<String>) {
-        self.messages.push(Message::User(text.into()));
+        let ce = ConversationEntry::user(text.into());
+        self.messages.push(ce);
     }
 
     #[must_use]
     pub fn push_assistant(&mut self, turn: AssistantTurn) -> Vec<PendingCall> {
         match turn {
-            AssistantTurn::Completed { text } => {
-                self.messages.push(Message::Assistant {
-                    text,
-                    tool_calls: Vec::new(),
-                });
+            AssistantTurn::Completed { text, tokens } => {
+                let ce = ConversationEntry::agent(text, Vec::new(), tokens);
+                self.messages.push(ce);
                 Vec::new()
             }
-            AssistantTurn::ToolCalls { text, calls } => {
+            AssistantTurn::ToolCalls { text, calls, tokens } => {
                 let pending: Vec<PendingCall> = calls
                     .iter()
                     .map(|c| PendingCall {
@@ -53,20 +49,17 @@ impl Conversation {
                         arguments: c.arguments.clone(),
                     })
                     .collect();
-                self.messages.push(Message::Assistant {
-                    text,
-                    tool_calls: calls,
-                });
+
+                let ce = ConversationEntry::agent(text.clone(), calls, tokens);
+                self.messages.push(ce);
                 pending
             }
         }
     }
 
     pub fn resolve(&mut self, call: PendingCall, result: ToolResult) {
-        self.messages.push(Message::Tool {
-            call_id: call.id,
-            result,
-        });
+        let ce = ConversationEntry::tool_output(call.id, result, call.name);
+        self.messages.push(ce);
     }
 
     pub fn reset(&mut self) {
