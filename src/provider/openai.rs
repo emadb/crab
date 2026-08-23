@@ -190,13 +190,11 @@ impl LlmClient for OpenAiClient {
         Ok(if calls.is_empty() {
             AssistantTurn::Completed {
                 text,
-                prompt_tokens: usage.prompt_tokens,
                 completion_tokens: usage.completion_tokens
             }
         } else {
             AssistantTurn::ToolCalls {
                 text, calls,
-                prompt_tokens: usage.prompt_tokens,
                 completion_tokens: usage.completion_tokens
             }
         })

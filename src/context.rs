@@ -36,19 +36,13 @@ impl Conversation {
     #[must_use]
     pub fn push_assistant(&mut self, turn: AssistantTurn) -> Vec<PendingCall> {
         match turn {
-            AssistantTurn::Completed { text, prompt_tokens, completion_tokens } => {
-                let last = self.messages.last_mut();
-                if let Some(m) = last { m.tokens = prompt_tokens }
-
+            AssistantTurn::Completed { text, completion_tokens } => {
                 let ce = ConversationEntry::agent(text, Vec::new(), completion_tokens);
                 self.messages.push(ce);
 
                 Vec::new()
             }
-            AssistantTurn::ToolCalls { text, calls, prompt_tokens, completion_tokens } => {
-                let last = self.messages.last_mut();
-                if let Some(m) = last { m.tokens = prompt_tokens }
-
+            AssistantTurn::ToolCalls { text, calls, completion_tokens } => {
                 let pending: Vec<PendingCall> = calls
                     .iter()
                     .map(|c| PendingCall {
