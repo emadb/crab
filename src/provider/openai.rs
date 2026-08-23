@@ -141,14 +141,11 @@ impl LlmClient for OpenAiClient {
         let mut events = Box::pin(sse_events(response.bytes_stream()));
         let mut text = String::new();
         let mut calls: Vec<ToolCall> = Vec::new();
-        let mut usage: UsageInfo =  UsageInfo { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+        let mut usage: Option<UsageInfo> = None;
 
         while let Some(data) = events.try_next().await? {
             let parsed: ChunkResponse = serde_json::from_str(&data)?;
-
-            if let Some(u) = parsed.usage {
-                usage = u;
-            }
+            usage = parsed.usage;
 
             let Some(choice) = parsed.choices.into_iter().next() else {
                 continue;
@@ -184,18 +181,17 @@ impl LlmClient for OpenAiClient {
             }
         }
 
-        println!("PROMPT: {}", usage.prompt_tokens);
-        println!("COMPLE: {}", usage.completion_tokens);
+        let tokens = usage.map(|u| u.completion_tokens);
 
         Ok(if calls.is_empty() {
             AssistantTurn::Completed {
                 text,
-                completion_tokens: usage.completion_tokens
+                completion_tokens: tokens,
             }
         } else {
             AssistantTurn::ToolCalls {
                 text, calls,
-                completion_tokens: usage.completion_tokens
+                completion_tokens: tokens,
             }
         })
     }
