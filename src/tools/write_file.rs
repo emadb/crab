@@ -48,7 +48,7 @@ impl Tool for WriteFile {
         let file = open_or_create_file(target, args.file);
 
         if file.is_err() {
-            return Err(ToolError(format!("Error while opening or creting the file")))
+            return Err(ToolError(String::from("Error while opening or creting the file")))
         }
 
         let mut file = file.unwrap();

@@ -27,9 +27,9 @@ impl Ui for StdoutUi {
     }
     fn ask_permission(&self) -> bool {
         println!("Proceed with tool execution? [y/N]");
-
+        // TODO: implement a better readchar
         let mut s = [0_u8];
-        let _ = std::io::stdin().read_exact(&mut s).unwrap();
+        std::io::stdin().read_exact(&mut s).unwrap();
         s == [121]
     }
 }

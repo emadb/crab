@@ -57,7 +57,7 @@ impl Tool for ReadFile {
             .lines()
             .take(2000)
             .map(|l| {
-                n = n + 1;
+                n += 1;
                 format!("{:>5}\t{}", n, l)
             }).collect();
 
