@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::fs::{File};
+use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -38,7 +38,8 @@ impl Tool for WriteFile {
     }
 
     async fn execute(&self, args: serde_json::Value) -> Result<String, ToolError> {
-        let args: WriteFileArgs = serde_json::from_value(args).map_err(|e| ToolError(e.to_string()))?;
+        let args: WriteFileArgs =
+            serde_json::from_value(args).map_err(|e| ToolError(e.to_string()))?;
 
         let target = self.root.join(&args.file);
         if target.is_dir() {
@@ -48,7 +49,9 @@ impl Tool for WriteFile {
         let file = open_or_create_file(target, args.file);
 
         if file.is_err() {
-            return Err(ToolError(String::from("Error while opening or creting the file")))
+            return Err(ToolError(String::from(
+                "Error while opening or creting the file",
+            )));
         }
 
         let mut file = file.unwrap();
@@ -58,7 +61,6 @@ impl Tool for WriteFile {
         }
         let _ = file.flush();
 
-
         Ok(args.content)
     }
 }
@@ -67,8 +69,6 @@ fn open_or_create_file(target: PathBuf, file: String) -> Result<File, std::io::E
     if !target.exists() {
         File::create(file)
     } else {
-        File::options()
-            .append(true)
-            .open(file)
+        File::options().append(true).open(file)
     }
 }

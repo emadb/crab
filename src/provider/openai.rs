@@ -73,14 +73,16 @@ pub struct OpenAiClient {
     client: reqwest::Client,
     base_url: String,
     model: String,
+    api_key: Option<String>,
 }
 
 impl OpenAiClient {
-    pub fn new(base_url: String, model: String) -> Self {
+    pub fn new(base_url: String, model: String, api_key: Option<String>) -> Self {
         Self {
             client: reqwest::Client::new(),
             base_url,
             model,
+            api_key,
         }
     }
 }
@@ -93,7 +95,7 @@ impl LlmClient for OpenAiClient {
         on_delta: &mut (dyn FnMut(Delta) + Send),
     ) -> Result<AssistantTurn, LlmError> {
         let url = format!("{}/chat/completions", self.base_url);
-        let response = self
+        let mut request = self
             .client
             .post(&url)
             .json(&ChatRequest {
@@ -101,7 +103,14 @@ impl LlmClient for OpenAiClient {
                 messages: req.messages.iter().map(build_message).collect(),
                 stream: true,
                 tools: tools_json(req.tools),
-            })
+            });
+
+        if let Some(key) = &self.api_key {
+            request = request.bearer_auth(key);
+        }
+
+
+        let response = request
             .send()
             .await?;
 

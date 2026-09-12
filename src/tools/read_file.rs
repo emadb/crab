@@ -10,7 +10,6 @@ use crate::tools::{Tool, ToolError};
 struct ReadFileArgs {
     #[serde()]
     file_name: String,
-
 }
 
 pub struct ReadFile {
@@ -38,16 +37,23 @@ impl Tool for ReadFile {
     }
 
     async fn execute(&self, args: serde_json::Value) -> Result<String, ToolError> {
-        let args: ReadFileArgs = serde_json::from_value(args).map_err(|e| ToolError(e.to_string()))?;
+        let args: ReadFileArgs =
+            serde_json::from_value(args).map_err(|e| ToolError(e.to_string()))?;
 
         let file_name = self.dir.join(&args.file_name);
         if file_name.is_dir() {
-            return Err(ToolError(format!("'{}' is a directory", file_name.display())));
+            return Err(ToolError(format!(
+                "'{}' is a directory",
+                file_name.display()
+            )));
         }
 
         let content: std::io::Result<String> = fs::read_to_string(&file_name);
         if content.is_err() {
-            return Err(ToolError(format!("Error while reading {}", file_name.display())));
+            return Err(ToolError(format!(
+                "Error while reading {}",
+                file_name.display()
+            )));
         }
 
         let lines = content.unwrap();
@@ -59,7 +65,8 @@ impl Tool for ReadFile {
             .map(|l| {
                 n += 1;
                 format!("{:>5}\t{}", n, l)
-            }).collect();
+            })
+            .collect();
 
         if lines.lines().count() > 2000 {
             string_line.push(format!("[...more {} lines...]", lines.lines().count()));

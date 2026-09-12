@@ -1,26 +1,25 @@
+use crate::tools::{Tool, ToolError};
 use async_trait::async_trait;
 use grep::{
     regex::RegexMatcher,
-    searcher::{sinks::UTF8, BinaryDetection, SearcherBuilder},
+    searcher::{BinaryDetection, SearcherBuilder, sinks::UTF8},
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::{error::Error, fs, path::PathBuf};
-use crate::tools::{Tool, ToolError};
 
 #[derive(Deserialize, JsonSchema)]
 struct GrepArgs {
     #[serde()]
     pattern: String,
-    path: String
+    path: String,
 }
-
 
 pub struct Grep {}
 
 impl Grep {
     pub fn new() -> Self {
-        Self { }
+        Self {}
     }
 }
 
@@ -44,7 +43,6 @@ impl Tool for Grep {
 
         Ok(matches.join("\n"))
     }
-
 }
 
 // taken from https://github.com/BurntSushi/ripgrep/blob/master/crates/grep/examples/simplegrep.rs
@@ -68,7 +66,12 @@ fn search(pattern: &str, path: String) -> Result<Vec<String>, Box<dyn Error>> {
             &matcher,
             &file,
             UTF8(|line_number, line| {
-                matches.push(format!("{}:{}:{}", file.display(), line_number, line.trim_end()));
+                matches.push(format!(
+                    "{}:{}:{}",
+                    file.display(),
+                    line_number,
+                    line.trim_end()
+                ));
                 Ok(true)
             }),
         )?;

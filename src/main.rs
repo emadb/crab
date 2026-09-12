@@ -7,7 +7,14 @@ mod tools;
 mod ui;
 
 use crate::{
-    agent::Agent, context::Conversation, provider::openai::OpenAiClient, tools::{edit_file::Edit, grep::Grep, ls::Ls, read_file::ReadFile, registry::ToolRegistry, shell_command::ShellCommand, write_file::WriteFile}, ui::render::StdoutUi,
+    agent::Agent,
+    context::Conversation,
+    provider::openai::OpenAiClient,
+    tools::{
+        edit_file::Edit, grep::Grep, ls::Ls, read_file::ReadFile, registry::ToolRegistry,
+        shell_command::ShellCommand, write_file::WriteFile,
+    },
+    ui::render::StdoutUi,
 };
 use anyhow::Result;
 use clap::Parser;
@@ -16,11 +23,16 @@ use std::process::exit;
 
 #[derive(clap::Parser)]
 struct Cli {
+    #[arg(long, default_value = "CRAB_API_KEY")]
+    api_key_env: String,
     #[arg(long, default_value = "http://localhost:8080/v1")]
     base_url: String,
     #[arg(long, default_value = "phi3")]
     model: String,
-    #[arg(long, default_value = "You are a coding agent specialized in writing clean and simple code. You have three tools: `ls` to list the content of a specific folder, `read_file` to read the content of a file and `grep` to search a pattern inside a file. Explore the content of the folder and think before sending a response to the user. If you need more details about a particular topic, ask the user, don't invent answers or take a decision without having all the informations")]
+    #[arg(
+        long,
+        default_value = "You are a coding agent specialized in writing clean and simple code. You have three tools: `ls` to list the content of a specific folder, `read_file` to read the content of a file and `grep` to search a pattern inside a file. Explore the content of the folder and think before sending a response to the user. If you need more details about a particular topic, ask the user, don't invent answers or take a decision without having all the informations"
+    )]
     system: Option<String>,
 }
 
@@ -36,7 +48,9 @@ async fn main() -> Result<()> {
     tools.register(Box::new(ShellCommand::new()));
     tools.register(Box::new(Edit::new()));
 
-    let llm = Box::new(OpenAiClient::new(cli.base_url, cli.model));
+    let api_key = std::env::var(&cli.api_key_env).ok();
+
+    let llm = Box::new(OpenAiClient::new(cli.base_url, cli.model, api_key));
     let ui = Box::new(StdoutUi);
     let agent = Agent::new(llm, tools, ui);
     let mut conversation = Conversation::new(cli.system);

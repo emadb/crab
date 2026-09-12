@@ -65,8 +65,11 @@ impl Agent {
 
             for call in pending {
                 let args = serde_json::from_str(call.arguments());
-                let args = args.map_or(json!({"error": "Error parsing the arguments."}), |a| { a });
-                self.ui.emit(AgentEvent::ToolExecutionStarted { name: String::from(call.name()), arguments: args });
+                let args = args.unwrap_or(json!({"error": "Error parsing the arguments."}));
+                self.ui.emit(AgentEvent::ToolExecutionStarted {
+                    name: String::from(call.name()),
+                    arguments: args,
+                });
                 if self.ui.ask_permission() {
                     let result = self.execute(call.name(), call.arguments()).await;
                     self.ui.emit(AgentEvent::ToolFinished {
@@ -75,7 +78,6 @@ impl Agent {
                     });
                     conversation.resolve(call, result);
                 }
-
             }
         }
 

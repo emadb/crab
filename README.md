@@ -36,6 +36,14 @@ You can run the agent using the following command:
 cargo run -- --base-url <YOUR_BASE_URL> --model <YOUR_MODEL_NAME> --system \"<YOUR_SYSTEM_PROMPT>\"
 ```
 
+If you want to run this with Azure Foundry (the env must contains the CRAB_API_KEY)
+
+```bash
+cargo run -- \
+  --base-url https://ema-ai-playground-resource.services.ai.azure.com/openai/v1 \
+  --model <gpt-sol-deployment-name>
+```
+
 **Arguments:**
 - `--base-url`: The URL of the LLM API (default: `http://localhost:8080/v1`).
 - `--model`: The name of the model to use (default: `phi3`).

@@ -12,13 +12,11 @@ struct EditArgs {
     new_text: String,
 }
 
-
-pub struct Edit {
-}
+pub struct Edit {}
 
 impl Edit {
     pub fn new() -> Self {
-        Self { }
+        Self {}
     }
 }
 
@@ -38,7 +36,6 @@ impl Tool for Edit {
 
     async fn execute(&self, args: serde_json::Value) -> Result<String, ToolError> {
         let args: EditArgs = serde_json::from_value(args).map_err(|e| ToolError(e.to_string()))?;
-
 
         let content: std::io::Result<String> = fs::read_to_string(&args.file);
         if content.is_err() {
