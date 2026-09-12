@@ -1,11 +1,19 @@
 use crate::message::{Message, ToolCall, ToolResult};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
+pub enum Origin {
+    SystemPrompt,
+    UserInput,
+    ModelText,
+    ToolOutput(String),
+}
+
+#[derive(Debug, Clone)]
 pub struct ConversationEntry {
     pub message: Message,
-    pub tokens: usize,
+    pub tokens: Option<usize>,
     pub origin: Origin,
-    pub compacted: bool,
+    pub compacted: bool
 }
 
 impl ConversationEntry {
@@ -16,7 +24,7 @@ impl ConversationEntry {
         };
         Self {
             message: message,
-            tokens: tokens,
+            tokens: Some(tokens),
             origin: Origin::SystemPrompt,
             compacted: false
         }
@@ -24,12 +32,12 @@ impl ConversationEntry {
     pub fn user(text: String) -> Self {
         Self {
             message: Message::User(text.clone()),
-            tokens: text.len() / 4,
+            tokens: Some(text.len() / 4),
             origin: Origin::UserInput,
             compacted: false
         }
     }
-    pub fn agent(text: String, tool_calls: Vec<ToolCall>, tokens: usize) -> Self {
+    pub fn agent(text: String, tool_calls: Vec<ToolCall>, tokens: Option<usize>) -> Self {
         Self {
             message: Message::Assistant{text: text.clone(), tool_calls: tool_calls},
             tokens: tokens,
@@ -40,16 +48,9 @@ impl ConversationEntry {
     pub fn tool_output(call_id: String, result: ToolResult, tool_name: String) -> Self {
         Self {
             message: Message::Tool { call_id, result: result.clone() },
-            tokens: result.content.len() / 4,
+            tokens: Some(result.content.len() / 4),
             origin: Origin::ToolOutput(tool_name),
             compacted: false
         }
     }
-}
-#[derive(Debug)]
-pub enum Origin {
-    SystemPrompt,
-    UserInput,
-    ModelText,
-    ToolOutput(String)
 }

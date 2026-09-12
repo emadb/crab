@@ -79,9 +79,9 @@ struct ChunkResponse {
 
 #[derive(serde::Deserialize, Debug)]
 pub struct UsageInfo {
-    pub prompt_tokens: usize,
+    // pub prompt_tokens: usize,
+    // pub total_tokens: usize,
     pub completion_tokens: usize,
-    pub total_tokens: usize,
 }
 
 pub struct OpenAiClient {

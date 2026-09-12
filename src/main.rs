@@ -35,6 +35,8 @@ struct Cli {
         default_value = "You are a coding agent specialized in writing clean and simple code. You have three tools: `ls` to list the content of a specific folder, `read_file` to read the content of a file and `grep` to search a pattern inside a file. Explore the content of the folder and think before sending a response to the user. If you need more details about a particular topic, ask the user, don't invent answers or take a decision without having all the informations"
     )]
     system: Option<String>,
+    #[arg(long, default_value = "32768")]
+    context_size: u32,
 }
 
 #[tokio::main]
@@ -54,7 +56,7 @@ async fn main() -> Result<()> {
     let llm = Box::new(OpenAiClient::new(cli.base_url, cli.model, api_key));
     let ui = Box::new(StdoutUi);
     let agent = Agent::new(llm, tools, ui);
-    let mut conversation = Conversation::new(cli.system);
+    let mut conversation = Conversation::new(cli.system, cli.context_size);
 
     println!("I'm crab!");
     let mut rl = DefaultEditor::new()?;
@@ -69,9 +71,9 @@ async fn main() -> Result<()> {
                     if let Err(e) = agent.run_turn(&mut conversation, line).await {
                         eprintln!("error: {e}");
                     }
-                    for c in &conversation.messages {
-                        println!("- {:?}", c)
-                    }
+                    // for c in &conversation.messages {
+                    //     println!("- {:?}", c)
+                    // }
                 }
             },
             _ => {
