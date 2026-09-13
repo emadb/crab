@@ -1,5 +1,5 @@
 use crate::ui::{AgentEvent, Ui};
-use std::io::{Read, Write};
+use std::io::{Write};
 
 pub struct StdoutUi;
 
@@ -26,12 +26,12 @@ impl Ui for StdoutUi {
         }
     }
     fn ask_permission(&self) -> bool {
-        return true;
-        // TODO: use `console crate`
+        let term = console::Term::stdout();
         println!("Proceed with tool execution? [y/N]");
-        // TODO: implement a better readchar
-        let mut s = [0_u8];
-        std::io::stdin().read_exact(&mut s).unwrap();
-        s == [121]
+
+        match term.read_char() {
+            Ok(c) => c == 'y',
+            _ => false
+        }
     }
 }
