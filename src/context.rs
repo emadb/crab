@@ -1,8 +1,4 @@
-use std::arch::aarch64::float32x2_t;
-
-use reqwest::header::HeaderName;
-
-use crate::{conversation_entry::{ConversationEntry, Origin}, message::{AssistantTurn, ToolResult}};
+use crate::{conversation_entry::{ConversationEntry}, message::{AssistantTurn, ToolResult}};
 
 #[derive(Debug)]
 pub struct Conversation {
@@ -40,7 +36,6 @@ impl Conversation {
             self.current_context += tokens as u32;
         }
         self.messages.push(ce);
-        self.verify_context_size();
     }
 
     #[must_use]
@@ -52,7 +47,6 @@ impl Conversation {
                 if let Some(tokens) = completion_tokens {
                     self.current_context += tokens as u32;
                 }
-                self.verify_context_size();
                 Vec::new()
             }
             AssistantTurn::ToolCalls { text, calls, completion_tokens } => {
@@ -69,7 +63,6 @@ impl Conversation {
                 }
                 let ce = ConversationEntry::agent(text.clone(), calls, completion_tokens);
                 self.messages.push(ce);
-                self.verify_context_size();
                 pending
             }
         }
@@ -84,14 +77,20 @@ impl Conversation {
         *self = Self::new(self.system.clone(), self.context_size);
     }
 
-    fn verify_context_size(&self) {
+    pub fn needs_compression(&self) -> bool {
         let threshold =  (0.8 * (self.context_size as f32)).floor() as u32;
-        if self.current_context > threshold {
-            // Sostituisco tutti i messaggi (Tranne il system prompt) con un messaggio riassuntivo
-            // Chiedo all'AI di fare il riassunto e prendo il messaggio di risposta come sostituto
-            // di tutta la conversazione
-        }
+        self.current_context > threshold
     }
+
+    // fn verify_context_size(&self) {
+    //     let threshold =  (0.8 * (self.context_size as f32)).floor() as u32;
+    //     if self.current_context > threshold {
+    //         // Sostituisco tutti i messaggi (Tranne il system prompt) con un messaggio riassuntivo
+    //         // Chiedo all'AI di fare il riassunto e prendo il messaggio di risposta come sostituto
+    //         // di tutta la conversazione
+    //     }
+    // }
+
 
     // fn verify_context_size(&self) {
     //     let threshold =  (0.8 * (self.context_size as f32)).floor() as u32;

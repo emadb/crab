@@ -16,6 +16,39 @@ pub struct Agent {
     max_iterations: usize,
 }
 
+const COMPACT_PROMPT: &str = "The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.
+
+Use this EXACT format:
+
+## Goal
+[What is the user trying to accomplish? Can be multiple items if the session covers different tasks.]
+
+## Constraints & Preferences
+- [Any constraints, preferences, or requirements mentioned by user]
+- [Or '(none)' if none were mentioned]
+
+## Progress
+### Done
+- [x] [Completed tasks/changes]
+
+### In Progress
+- [ ] [Current work]
+
+### Blocked
+- [Issues preventing progress, if any]
+
+## Key Decisions
+- **[Decision]**: [Brief rationale]
+
+## Next Steps
+1. [Ordered list of what should happen next]
+
+## Critical Context
+- [Any data, examples, or references needed to continue]
+- [Or '(none)' if not applicable]
+
+Keep each section concise. Preserve exact file paths, function names, and error messages.";
+
 impl Agent {
     pub fn new(llm: Box<dyn LlmClient>, tools: ToolRegistry, ui: Box<dyn Ui>) -> Self {
         Self {
@@ -31,6 +64,12 @@ impl Agent {
         conversation: &mut Conversation,
         input: &str,
     ) -> Result<(), AgentError> {
+
+        if conversation.needs_compression() {
+            // TODO: manage error
+            let _ = self.compact_conversation(conversation).await;
+        }
+
         conversation.push_user(input);
 
         for _ in 0..self.max_iterations {
@@ -55,7 +94,6 @@ impl Agent {
             };
 
             let completed = matches!(turn, AssistantTurn::Completed { .. });
-
             let pending = conversation.push_assistant(turn);
 
             if completed {
@@ -111,5 +149,33 @@ impl Agent {
                 is_error: true,
             },
         }
+    }
+
+    // TODO: remove duplications
+    async fn compact_conversation(&self, conversation: &mut Conversation) -> Result<(), AgentError> {
+        let specs = self.tools.specs();
+        conversation.push_user(COMPACT_PROMPT);
+        let messages = conversation.messages.as_slice();
+        let request = TurnRequest {
+            messages,
+            tools: &specs,
+        };
+
+        let ui = &self.ui;
+        let mut on_delta = |delta: Delta| {
+            ui.emit(match delta {
+                Delta::Text(text) => AgentEvent::TextDelta(text),
+                Delta::ToolCallStarted { name } => AgentEvent::ToolStarted { name },
+            });
+        };
+
+        let turn = match self.llm.send(request, &mut on_delta).await {
+            Ok(turn) => turn,
+            Err(e) => return Err(e.into()),
+        };
+
+        let _ = conversation.push_assistant(turn);
+        self.ui.emit(AgentEvent::TurnEnded);
+        return Ok(())
     }
 }

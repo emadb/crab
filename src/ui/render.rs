@@ -26,6 +26,8 @@ impl Ui for StdoutUi {
         }
     }
     fn ask_permission(&self) -> bool {
+        return true;
+        // TODO: use `console crate`
         println!("Proceed with tool execution? [y/N]");
         // TODO: implement a better readchar
         let mut s = [0_u8];
