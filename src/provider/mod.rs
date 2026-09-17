@@ -23,6 +23,8 @@ pub enum LlmError {
     Parse(#[from] serde_json::Error),
     #[error("malformed SSE UTF-8: {0}")]
     SseUtf8(#[from] std::string::FromUtf8Error),
+    #[error("stream ended before the model completed the turn")]
+    IncompleteStream,
 }
 
 #[async_trait::async_trait]

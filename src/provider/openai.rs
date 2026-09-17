@@ -69,6 +69,7 @@ struct FunctionChunk {
 #[derive(Deserialize, Debug)]
 struct ChunkChoice {
     delta: DeltaChunk,
+    finish_reason: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -89,6 +90,7 @@ struct TurnAccumulator {
     text: String,
     calls: Vec<ToolCall>,
     usage: Option<UsageInfo>,
+    finished: bool,
 }
 
 impl TurnAccumulator {
@@ -97,11 +99,13 @@ impl TurnAccumulator {
             self.usage = response.usage;
         }
 
-        response
-            .choices
-            .into_iter()
-            .flat_map(|choice| self.apply_delta(choice.delta))
-            .collect()
+        let mut events = Vec::new();
+        for choice in response.choices {
+            self.finished |= choice.finish_reason.is_some();
+            events.extend(self.apply_delta(choice.delta));
+        }
+
+        events
     }
 
     fn apply_delta(&mut self, delta: DeltaChunk) -> Vec<Delta> {
@@ -136,10 +140,14 @@ impl TurnAccumulator {
         events
     }
 
-    fn finish(self) -> AssistantTurn {
+    fn finish(self) -> Result<AssistantTurn, LlmError> {
+        if !self.finished {
+            return Err(LlmError::IncompleteStream);
+        }
+
         let completion_tokens = self.usage.map(|usage| usage.completion_tokens);
 
-        if self.calls.is_empty() {
+        Ok(if self.calls.is_empty() {
             AssistantTurn::Completed {
                 text: self.text,
                 completion_tokens,
@@ -150,7 +158,7 @@ impl TurnAccumulator {
                 calls: self.calls,
                 completion_tokens,
             }
-        }
+        })
     }
 }
 
@@ -205,7 +213,7 @@ impl LlmClient for OpenAiClient {
 
         let status = response.status();
         if !status.is_success() {
-            let body = response.text().await.unwrap_or_default();
+            let body = response.text().await?;
             return Err(LlmError::Api {
                 status: status.as_u16(),
                 body,
@@ -221,7 +229,7 @@ impl LlmClient for OpenAiClient {
             }
         }
 
-        Ok(turn.finish())
+        turn.finish()
     }
 }
 
@@ -313,11 +321,21 @@ mod tests {
     use crate::{message::AssistantTurn, provider::Delta};
 
     #[test]
+    fn rejects_a_stream_without_a_finish_reason() {
+        let accumulator = TurnAccumulator::default();
+
+        assert!(matches!(
+            accumulator.finish(),
+            Err(crate::provider::LlmError::IncompleteStream)
+        ));
+    }
+
+    #[test]
     fn accumulates_text_usage_and_multiple_tool_calls() {
         let chunks = [
             r#"{"choices":[{"delta":{"content":"I ","tool_calls":[{"index":0,"id":"call_1","function":{"name":"read_","arguments":"{\"path\":\""}},{"index":1,"id":"call_2","function":{"name":"ls","arguments":"{\"path\":\""}}]}}]}"#,
             r#"{"choices":[{"delta":{"content":"found","tool_calls":[{"index":0,"function":{"name":"file","arguments":"src/main.rs\"}"}},{"index":1,"function":{"arguments":"src\"}"}}]}}]}"#,
-            r#"{"choices":[],"usage":{"completion_tokens":12}}"#,
+            r#"{"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"completion_tokens":12}}"#,
         ];
         let mut accumulator = TurnAccumulator::default();
         let mut events = Vec::new();
@@ -334,11 +352,11 @@ mod tests {
         assert!(matches!(events[3], Delta::Text(ref text) if text == "found"));
 
         match accumulator.finish() {
-            AssistantTurn::ToolCalls {
+            Ok(AssistantTurn::ToolCalls {
                 text,
                 calls,
                 completion_tokens,
-            } => {
+            }) => {
                 assert_eq!(text, "I found");
                 assert_eq!(completion_tokens, Some(12));
                 assert_eq!(calls.len(), 2);
@@ -349,7 +367,8 @@ mod tests {
                 assert_eq!(calls[1].name, "ls");
                 assert_eq!(calls[1].arguments, r#"{"path":"src"}"#);
             }
-            AssistantTurn::Completed { .. } => panic!("missing tool calls"),
+            Ok(AssistantTurn::Completed { .. }) => panic!("missing tool calls"),
+            Err(error) => panic!("incomplete stream: {error}"),
         }
     }
 }
