@@ -21,6 +21,8 @@ pub enum LlmError {
     Network(#[from] reqwest::Error),
     #[error("malformed response: {0}")]
     Parse(#[from] serde_json::Error),
+    #[error("malformed SSE UTF-8: {0}")]
+    SseUtf8(#[from] std::string::FromUtf8Error),
 }
 
 #[async_trait::async_trait]
