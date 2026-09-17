@@ -13,8 +13,15 @@ pub struct ToolResult {
 
 #[derive(Debug, Clone)]
 pub enum AssistantTurn {
-    Completed { text: String, completion_tokens: Option<usize> },
-    ToolCalls { text: String, calls: Vec<ToolCall>,  completion_tokens: Option<usize> },
+    Completed {
+        text: String,
+        completion_tokens: Option<usize>,
+    },
+    ToolCalls {
+        text: String,
+        calls: Vec<ToolCall>,
+        completion_tokens: Option<usize>,
+    },
 }
 
 #[derive(Debug, Clone)]

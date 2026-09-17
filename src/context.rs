@@ -1,4 +1,7 @@
-use crate::{conversation_entry::{ConversationEntry}, message::{AssistantTurn, ToolResult}};
+use crate::{
+    conversation_entry::ConversationEntry,
+    message::{AssistantTurn, ToolResult},
+};
 
 #[derive(Debug)]
 pub struct Conversation {
@@ -27,7 +30,12 @@ impl PendingCall {
 impl Conversation {
     pub fn new(system: Option<String>, context_size: u32) -> Self {
         let message = ConversationEntry::system(system.clone());
-        Self { system, messages: vec![message], context_size, current_context: 0 }
+        Self {
+            system,
+            messages: vec![message],
+            context_size,
+            current_context: 0,
+        }
     }
 
     pub fn push_user(&mut self, text: impl Into<String>) {
@@ -41,7 +49,10 @@ impl Conversation {
     #[must_use]
     pub fn push_assistant(&mut self, turn: AssistantTurn) -> Vec<PendingCall> {
         match turn {
-            AssistantTurn::Completed { text, completion_tokens } => {
+            AssistantTurn::Completed {
+                text,
+                completion_tokens,
+            } => {
                 let ce = ConversationEntry::agent(text, Vec::new(), completion_tokens);
                 self.messages.push(ce);
                 if let Some(tokens) = completion_tokens {
@@ -49,7 +60,11 @@ impl Conversation {
                 }
                 Vec::new()
             }
-            AssistantTurn::ToolCalls { text, calls, completion_tokens } => {
+            AssistantTurn::ToolCalls {
+                text,
+                calls,
+                completion_tokens,
+            } => {
                 let pending: Vec<PendingCall> = calls
                     .iter()
                     .map(|c| PendingCall {
@@ -78,7 +93,7 @@ impl Conversation {
     }
 
     pub fn needs_compression(&self) -> bool {
-        let threshold =  (0.8 * (self.context_size as f32)).floor() as u32;
+        let threshold = (0.8 * (self.context_size as f32)).floor() as u32;
         self.current_context > threshold
     }
 
@@ -90,7 +105,6 @@ impl Conversation {
     //         // di tutta la conversazione
     //     }
     // }
-
 
     // fn verify_context_size(&self) {
     //     let threshold =  (0.8 * (self.context_size as f32)).floor() as u32;

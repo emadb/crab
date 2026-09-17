@@ -1,5 +1,5 @@
 use crate::ui::{AgentEvent, Ui};
-use std::io::{Write};
+use std::io::Write;
 
 pub struct StdoutUi;
 
@@ -31,7 +31,7 @@ impl Ui for StdoutUi {
 
         match term.read_char() {
             Ok(c) => c == 'y',
-            _ => false
+            _ => false,
         }
     }
 }

@@ -64,7 +64,6 @@ impl Agent {
         conversation: &mut Conversation,
         input: &str,
     ) -> Result<(), AgentError> {
-
         if conversation.needs_compression() {
             // TODO: manage error
             let _ = self.compact_conversation(conversation).await;
@@ -73,25 +72,7 @@ impl Agent {
         conversation.push_user(input);
 
         for _ in 0..self.max_iterations {
-            let specs = self.tools.specs();
-            let messages = conversation.messages.as_slice();
-            let request = TurnRequest {
-                messages,
-                tools: &specs,
-            };
-
-            let ui = &self.ui;
-            let mut on_delta = |delta: Delta| {
-                ui.emit(match delta {
-                    Delta::Text(text) => AgentEvent::TextDelta(text),
-                    Delta::ToolCallStarted { name } => AgentEvent::ToolStarted { name },
-                });
-            };
-
-            let turn = match self.llm.send(request, &mut on_delta).await {
-                Ok(turn) => turn,
-                Err(e) => return Err(e.into()),
-            };
+            let turn = self.request_turn(conversation).await?;
 
             let completed = matches!(turn, AssistantTurn::Completed { .. });
             let pending = conversation.push_assistant(turn);
@@ -151,16 +132,25 @@ impl Agent {
         }
     }
 
-    // TODO: remove duplications
-    async fn compact_conversation(&self, conversation: &mut Conversation) -> Result<(), AgentError> {
-        let specs = self.tools.specs();
+    async fn compact_conversation(
+        &self,
+        conversation: &mut Conversation,
+    ) -> Result<(), AgentError> {
         conversation.push_user(COMPACT_PROMPT);
-        let messages = conversation.messages.as_slice();
+
+        let turn = self.request_turn(conversation).await?;
+        let _ = conversation.push_assistant(turn);
+        self.ui.emit(AgentEvent::TurnEnded);
+
+        Ok(())
+    }
+
+    async fn request_turn(&self, conversation: &Conversation) -> Result<AssistantTurn, AgentError> {
+        let specs = self.tools.specs();
         let request = TurnRequest {
-            messages,
+            messages: conversation.messages.as_slice(),
             tools: &specs,
         };
-
         let ui = &self.ui;
         let mut on_delta = |delta: Delta| {
             ui.emit(match delta {
@@ -169,13 +159,6 @@ impl Agent {
             });
         };
 
-        let turn = match self.llm.send(request, &mut on_delta).await {
-            Ok(turn) => turn,
-            Err(e) => return Err(e.into()),
-        };
-
-        let _ = conversation.push_assistant(turn);
-        self.ui.emit(AgentEvent::TurnEnded);
-        return Ok(())
+        Ok(self.llm.send(request, &mut on_delta).await?)
     }
 }

@@ -110,24 +110,25 @@ impl LlmClient for OpenAiClient {
         on_delta: &mut (dyn FnMut(Delta) + Send),
     ) -> Result<AssistantTurn, LlmError> {
         let url = format!("{}/chat/completions", self.base_url);
-        let mut request = self
-            .client
-            .post(&url)
-            .json(&ChatRequest {
-                model: self.model.clone(),
-                messages: req.messages.iter().map(|m| build_message(&m.message)).collect(),
-                stream: true,
-                tools: tools_json(req.tools),
-                stream_options: Some(StreamOptions { include_usage: true }),
-            });
+        let mut request = self.client.post(&url).json(&ChatRequest {
+            model: self.model.clone(),
+            messages: req
+                .messages
+                .iter()
+                .map(|m| build_message(&m.message))
+                .collect(),
+            stream: true,
+            tools: tools_json(req.tools),
+            stream_options: Some(StreamOptions {
+                include_usage: true,
+            }),
+        });
 
         if let Some(key) = &self.api_key {
             request = request.bearer_auth(key);
         }
 
-        let response = request
-            .send()
-            .await?;
+        let response = request.send().await?;
 
         let status = response.status();
         if !status.is_success() {
@@ -190,7 +191,8 @@ impl LlmClient for OpenAiClient {
             }
         } else {
             AssistantTurn::ToolCalls {
-                text, calls,
+                text,
+                calls,
                 completion_tokens: tokens,
             }
         })
