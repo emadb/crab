@@ -84,6 +84,88 @@ pub struct UsageInfo {
     pub completion_tokens: usize,
 }
 
+#[derive(Default)]
+struct TurnAccumulator {
+    text: String,
+    calls: Vec<ToolCall>,
+    usage: Option<UsageInfo>,
+}
+
+impl TurnAccumulator {
+    fn apply(&mut self, response: ChunkResponse) -> Vec<Delta> {
+        if response.usage.is_some() {
+            self.usage = response.usage;
+        }
+
+        response
+            .choices
+            .into_iter()
+            .flat_map(|choice| self.apply_delta(choice.delta))
+            .collect()
+    }
+
+    fn apply_delta(&mut self, delta: DeltaChunk) -> Vec<Delta> {
+        let mut events = Vec::new();
+
+        if let Some(text) = delta.content {
+            self.text.push_str(&text);
+            events.push(Delta::Text(text));
+        }
+
+        for chunk in delta.tool_calls.unwrap_or_default() {
+            if self.calls.len() <= chunk.index {
+                self.calls.resize_with(chunk.index + 1, empty_call);
+            }
+            let call = &mut self.calls[chunk.index];
+
+            if let Some(id) = chunk.id {
+                call.id = id;
+            }
+
+            if let Some(function) = chunk.function {
+                if let Some(name) = function.name {
+                    if call.name.is_empty() {
+                        events.push(Delta::ToolCallStarted { name: name.clone() });
+                    }
+                    call.name.push_str(&name);
+                }
+                call.arguments.push_str(&function.arguments);
+            }
+        }
+
+        events
+    }
+
+    fn finish(self) -> AssistantTurn {
+        let completion_tokens = self.usage.map(|usage| usage.completion_tokens);
+
+        if self.calls.is_empty() {
+            AssistantTurn::Completed {
+                text: self.text,
+                completion_tokens,
+            }
+        } else {
+            AssistantTurn::ToolCalls {
+                text: self.text,
+                calls: self.calls,
+                completion_tokens,
+            }
+        }
+    }
+}
+
+fn empty_call() -> ToolCall {
+    ToolCall {
+        id: String::new(),
+        name: String::new(),
+        arguments: String::new(),
+    }
+}
+
+fn decode_chunk(data: &str) -> Result<ChunkResponse, LlmError> {
+    Ok(serde_json::from_str(data)?)
+}
+
 pub struct OpenAiClient {
     client: reqwest::Client,
     base_url: String,
@@ -110,19 +192,10 @@ impl LlmClient for OpenAiClient {
         on_delta: &mut (dyn FnMut(Delta) + Send),
     ) -> Result<AssistantTurn, LlmError> {
         let url = format!("{}/chat/completions", self.base_url);
-        let mut request = self.client.post(&url).json(&ChatRequest {
-            model: self.model.clone(),
-            messages: req
-                .messages
-                .iter()
-                .map(|m| build_message(&m.message))
-                .collect(),
-            stream: true,
-            tools: tools_json(req.tools),
-            stream_options: Some(StreamOptions {
-                include_usage: true,
-            }),
-        });
+        let mut request = self
+            .client
+            .post(&url)
+            .json(&build_request(&self.model, req));
 
         if let Some(key) = &self.api_key {
             request = request.bearer_auth(key);
@@ -140,62 +213,31 @@ impl LlmClient for OpenAiClient {
         }
 
         let mut events = Box::pin(sse_events(response.bytes_stream()));
-        let mut text = String::new();
-        let mut calls: Vec<ToolCall> = Vec::new();
-        let mut usage: Option<UsageInfo> = None;
+        let mut turn = TurnAccumulator::default();
 
         while let Some(data) = events.try_next().await? {
-            let parsed: ChunkResponse = serde_json::from_str(&data)?;
-            usage = parsed.usage;
-
-            let Some(choice) = parsed.choices.into_iter().next() else {
-                continue;
-            };
-
-            if let Some(token) = choice.delta.content {
-                text.push_str(&token);
-                on_delta(Delta::Text(token));
-            }
-
-            for tc in choice.delta.tool_calls.unwrap_or_default() {
-                if tc.index >= calls.len() {
-                    calls.push(ToolCall {
-                        id: String::new(),
-                        name: String::new(),
-                        arguments: String::new(),
-                    });
-                }
-
-                let call = &mut calls[tc.index];
-                if let Some(name) = tc.function.as_ref().and_then(|f| f.name.clone()) {
-                    if call.name.is_empty() {
-                        on_delta(Delta::ToolCallStarted { name: name.clone() });
-                    }
-                    call.name = name;
-                }
-                if let Some(id) = tc.id {
-                    call.id = id;
-                }
-                if let Some(function) = tc.function {
-                    call.arguments.push_str(&function.arguments);
-                }
+            for delta in turn.apply(decode_chunk(&data)?) {
+                on_delta(delta);
             }
         }
 
-        let tokens = usage.map(|u| u.completion_tokens);
+        Ok(turn.finish())
+    }
+}
 
-        Ok(if calls.is_empty() {
-            AssistantTurn::Completed {
-                text,
-                completion_tokens: tokens,
-            }
-        } else {
-            AssistantTurn::ToolCalls {
-                text,
-                calls,
-                completion_tokens: tokens,
-            }
-        })
+fn build_request(model: &str, request: TurnRequest<'_>) -> ChatRequest {
+    ChatRequest {
+        model: model.to_string(),
+        messages: request
+            .messages
+            .iter()
+            .map(|entry| build_message(&entry.message))
+            .collect(),
+        stream: true,
+        tools: tools_json(request.tools),
+        stream_options: Some(StreamOptions {
+            include_usage: true,
+        }),
     }
 }
 
@@ -263,4 +305,51 @@ fn tools_json(specs: &[ToolSpec]) -> serde_json::Value {
         })
         .collect();
     serde_json::json!(jtool)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TurnAccumulator, decode_chunk};
+    use crate::{message::AssistantTurn, provider::Delta};
+
+    #[test]
+    fn accumulates_text_usage_and_multiple_tool_calls() {
+        let chunks = [
+            r#"{"choices":[{"delta":{"content":"I ","tool_calls":[{"index":0,"id":"call_1","function":{"name":"read_","arguments":"{\"path\":\""}},{"index":1,"id":"call_2","function":{"name":"ls","arguments":"{\"path\":\""}}]}}]}"#,
+            r#"{"choices":[{"delta":{"content":"found","tool_calls":[{"index":0,"function":{"name":"file","arguments":"src/main.rs\"}"}},{"index":1,"function":{"arguments":"src\"}"}}]}}]}"#,
+            r#"{"choices":[],"usage":{"completion_tokens":12}}"#,
+        ];
+        let mut accumulator = TurnAccumulator::default();
+        let mut events = Vec::new();
+
+        for chunk in chunks {
+            let response =
+                decode_chunk(chunk).unwrap_or_else(|error| panic!("invalid JSON: {error}"));
+            events.extend(accumulator.apply(response));
+        }
+
+        assert!(matches!(events[0], Delta::Text(ref text) if text == "I "));
+        assert!(matches!(events[1], Delta::ToolCallStarted { ref name } if name == "read_"));
+        assert!(matches!(events[2], Delta::ToolCallStarted { ref name } if name == "ls"));
+        assert!(matches!(events[3], Delta::Text(ref text) if text == "found"));
+
+        match accumulator.finish() {
+            AssistantTurn::ToolCalls {
+                text,
+                calls,
+                completion_tokens,
+            } => {
+                assert_eq!(text, "I found");
+                assert_eq!(completion_tokens, Some(12));
+                assert_eq!(calls.len(), 2);
+                assert_eq!(calls[0].id, "call_1");
+                assert_eq!(calls[0].name, "read_file");
+                assert_eq!(calls[0].arguments, r#"{"path":"src/main.rs"}"#);
+                assert_eq!(calls[1].id, "call_2");
+                assert_eq!(calls[1].name, "ls");
+                assert_eq!(calls[1].arguments, r#"{"path":"src"}"#);
+            }
+            AssistantTurn::Completed { .. } => panic!("missing tool calls"),
+        }
+    }
 }
