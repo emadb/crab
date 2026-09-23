@@ -1,10 +1,12 @@
 use crate::{
     message::{AssistantTurn, Message, ToolCall},
-    provider::{Delta, LlmClient, LlmError, TurnRequest, sse::sse_events},
+    provider::{Delta, LlmClient, LlmError, TurnRequest},
     tools::ToolSpec,
 };
-use futures_util::TryStreamExt;
+use reqwest_sse::EventSource;
 use serde::{Deserialize, Serialize};
+
+use tokio_stream::StreamExt;
 
 #[derive(Serialize)]
 struct StreamOptions {
@@ -117,8 +119,8 @@ impl TurnAccumulator {
         }
 
         for chunk in delta.tool_calls.unwrap_or_default() {
-            if self.calls.len() <= chunk.index {
-                self.calls.resize_with(chunk.index + 1, empty_call);
+            while self.calls.len() <= chunk.index {
+               self.calls.push(empty_call());
             }
             let call = &mut self.calls[chunk.index];
 
@@ -192,7 +194,7 @@ impl OpenAiClient {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait::async_trait(?Send)]
 impl LlmClient for OpenAiClient {
     async fn send(
         &self,
@@ -220,10 +222,13 @@ impl LlmClient for OpenAiClient {
             });
         }
 
-        let mut events = Box::pin(sse_events(response.bytes_stream()));
         let mut turn = TurnAccumulator::default();
-
-        while let Some(data) = events.try_next().await? {
+        let mut events = response.events().await.unwrap();
+        while let Some(evt) = events.next().await {
+            let data = evt.unwrap().data;
+            if data == "[DONE]" {
+                break;
+            }
             for delta in turn.apply(decode_chunk(&data)?) {
                 on_delta(delta);
             }

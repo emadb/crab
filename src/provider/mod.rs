@@ -1,5 +1,4 @@
 pub mod openai;
-pub mod sse;
 
 use crate::{conversation_entry::ConversationEntry, message::AssistantTurn, tools::ToolSpec};
 
@@ -27,7 +26,7 @@ pub enum LlmError {
     IncompleteStream,
 }
 
-#[async_trait::async_trait]
+#[async_trait::async_trait(?Send)]
 pub trait LlmClient: Send + Sync {
     async fn send(
         &self,
