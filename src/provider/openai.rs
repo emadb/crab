@@ -1,8 +1,9 @@
 use crate::{
-    message::{AssistantTurn, Message, ToolCall},
-    provider::{Delta, LlmClient, LlmError, TurnRequest},
+    message::{Message, ToolCall},
+    provider::{LlmClient, LlmError, TurnRequest},
     tools::ToolSpec,
 };
+use anyhow::{Context, Result};
 use reqwest_sse::EventSource;
 use serde::{Deserialize, Serialize};
 
@@ -48,121 +49,7 @@ struct WireFunction {
     arguments: String,
 }
 
-#[derive(Deserialize, Debug)]
-struct DeltaChunk {
-    content: Option<String>,
-    tool_calls: Option<Vec<ToolCallChunk>>,
-}
 
-#[derive(Deserialize, Debug)]
-struct ToolCallChunk {
-    index: usize,
-    id: Option<String>,
-    function: Option<FunctionChunk>,
-}
-
-#[derive(Deserialize, Debug)]
-struct FunctionChunk {
-    name: Option<String>,
-    #[serde(default)]
-    arguments: String,
-}
-
-#[derive(Deserialize, Debug)]
-struct ChunkChoice {
-    delta: DeltaChunk,
-    finish_reason: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct ChunkResponse {
-    choices: Vec<ChunkChoice>,
-    usage: Option<UsageInfo>,
-}
-
-#[derive(serde::Deserialize, Debug)]
-pub struct UsageInfo {
-    // pub prompt_tokens: usize,
-    // pub total_tokens: usize,
-    pub completion_tokens: usize,
-}
-
-#[derive(Default)]
-struct TurnAccumulator {
-    text: String,
-    calls: Vec<ToolCall>,
-    usage: Option<UsageInfo>,
-    finished: bool,
-}
-
-impl TurnAccumulator {
-    fn apply(&mut self, response: ChunkResponse) -> Vec<Delta> {
-        if response.usage.is_some() {
-            self.usage = response.usage;
-        }
-
-        let mut events = Vec::new();
-        for choice in response.choices {
-            self.finished |= choice.finish_reason.is_some();
-            events.extend(self.apply_delta(choice.delta));
-        }
-
-        events
-    }
-
-    fn apply_delta(&mut self, delta: DeltaChunk) -> Vec<Delta> {
-        let mut events = Vec::new();
-
-        if let Some(text) = delta.content {
-            self.text.push_str(&text);
-            events.push(Delta::Text(text));
-        }
-
-        for chunk in delta.tool_calls.unwrap_or_default() {
-            while self.calls.len() <= chunk.index {
-               self.calls.push(empty_call());
-            }
-            let call = &mut self.calls[chunk.index];
-
-            if let Some(id) = chunk.id {
-                call.id = id;
-            }
-
-            if let Some(function) = chunk.function {
-                if let Some(name) = function.name {
-                    if call.name.is_empty() {
-                        events.push(Delta::ToolCallStarted { name: name.clone() });
-                    }
-                    call.name.push_str(&name);
-                }
-                call.arguments.push_str(&function.arguments);
-            }
-        }
-
-        events
-    }
-
-    fn finish(self) -> Result<AssistantTurn, LlmError> {
-        if !self.finished {
-            return Err(LlmError::IncompleteStream);
-        }
-
-        let completion_tokens = self.usage.map(|usage| usage.completion_tokens);
-
-        Ok(if self.calls.is_empty() {
-            AssistantTurn::Completed {
-                text: self.text,
-                completion_tokens,
-            }
-        } else {
-            AssistantTurn::ToolCalls {
-                text: self.text,
-                calls: self.calls,
-                completion_tokens,
-            }
-        })
-    }
-}
 
 fn empty_call() -> ToolCall {
     ToolCall {
@@ -199,8 +86,8 @@ impl LlmClient for OpenAiClient {
     async fn send(
         &self,
         req: TurnRequest<'_>,
-        on_delta: &mut (dyn FnMut(Delta) + Send),
-    ) -> Result<AssistantTurn, LlmError> {
+        on_delta: &mut (dyn FnMut(ChunkResponse) + Send),
+    ) -> anyhow::Result<ConversationEntry> {
         let url = format!("{}/chat/completions", self.base_url);
         let mut request = self
             .client
@@ -215,26 +102,30 @@ impl LlmClient for OpenAiClient {
 
         let status = response.status();
         if !status.is_success() {
-            let body = response.text().await?;
-            return Err(LlmError::Api {
-                status: status.as_u16(),
-                body,
-            });
+            response.text().await?;
+            return Err(anyhow::Error::msg("Llm Error"));
         }
 
-        let mut turn = TurnAccumulator::default();
+
         let mut events = response.events().await.unwrap();
+        let mut accumulator = ChunkAccumulator::default();
+
         while let Some(evt) = events.next().await {
             let data = evt.unwrap().data;
             if data == "[DONE]" {
                 break;
             }
-            for delta in turn.apply(decode_chunk(&data)?) {
-                on_delta(delta);
-            }
+            let chunk: ChunkResponse = serde_json::from_str(&data).unwrap();
+            println!("> {:?}", &chunk);
+            // on_delta(chunk);
+            accumulator.push(chunk);
         }
 
-        turn.finish()
+        accumulator.finish()
+
+        // TODO
+        // Ok(AssistantTurn:: Completed{text: String::from("ciao"), completion_tokens: None})
+
     }
 }
 
@@ -320,60 +211,270 @@ fn tools_json(specs: &[ToolSpec]) -> serde_json::Value {
     serde_json::json!(jtool)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{TurnAccumulator, decode_chunk};
-    use crate::{message::AssistantTurn, provider::Delta};
+#[derive(Debug, Deserialize)]
+#[serde(try_from = "RawChunk")]
+pub enum ChunkResponse {
+    // Include il chunk iniziale con role=assistant e content=null.
+    Message {
+        index: u32,
+        delta: Delta,
+    },
 
-    #[test]
-    fn rejects_a_stream_without_a_finish_reason() {
-        let accumulator = TurnAccumulator::default();
+    ToolCalls {
+        index: u32,
+        delta: Delta,
+    },
 
-        assert!(matches!(
-            accumulator.finish(),
-            Err(crate::provider::LlmError::IncompleteStream)
-        ));
+    Finished {
+        index: u32,
+        reason: FinishReason,
+        // Conserviamo eventuali dati presenti anche nell'ultimo delta.
+        delta: Delta,
+    },
+
+    Usage {
+        usage: Usage,
+    },
+}
+
+
+#[derive(Debug, serde::Deserialize)]
+pub struct Choice {
+    pub index: u32,
+    pub delta: Delta,
+    pub finish_reason: Option<FinishReason>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Delta {
+    pub role: Option<String>,
+    pub content: Option<String>,
+    pub refusal: Option<String>,
+    pub tool_calls: Option<Vec<ToolCallDelta>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ToolCallDelta {
+    pub index: u32,
+    pub id: Option<String>,
+
+    #[serde(rename = "type")]
+    pub kind: Option<String>,
+
+    pub function: Option<FunctionDelta>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FunctionDelta {
+    pub name: Option<String>,
+
+    // Frammento di JSON: va concatenato, non parsato subito.
+    pub arguments: Option<String>,
+}
+
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FinishReason {
+    Stop,
+    Length,
+    ToolCalls,
+    ContentFilter,
+    FunctionCall,
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct Usage {
+    pub completion_tokens: u64,
+    pub prompt_tokens: u64,
+    pub total_tokens: u64,
+    pub prompt_tokens_details: Option<PromptTokensDetails>,
+    pub completion_tokens_details: Option<CompletionTokensDetails>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PromptTokensDetails {
+    pub cached_tokens: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CompletionTokensDetails {
+    pub reasoning_tokens: Option<u64>,
+}
+
+
+#[derive(Debug, Deserialize)]
+struct RawChunk {
+    choices: Vec<RawChoice>,
+    usage: Option<Usage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawChoice {
+    index: u32,
+    delta: Delta,
+    finish_reason: Option<FinishReason>,
+}
+
+impl TryFrom<RawChunk> for ChunkResponse {
+    type Error = String;
+
+    fn try_from(raw: RawChunk) -> Result<Self, Self::Error> {
+        let RawChunk { mut choices, usage } = raw;
+
+        if choices.is_empty() {
+            return usage
+                .map(|usage| Self::Usage { usage })
+                .ok_or_else(|| "Chunk senza choices e senza usage".to_owned());
+        }
+
+        if usage.is_some() {
+            return Err("Atteso usage in un chunk separato".to_owned());
+        }
+
+        let choice = choices.pop().ok_or("Choice mancante")?;
+
+        let RawChoice {
+            index,
+            delta,
+            finish_reason,
+        } = choice;
+
+        if let Some(reason) = finish_reason {
+            return Ok(Self::Finished {
+                index,
+                reason,
+                delta,
+            });
+        }
+
+        if delta
+            .tool_calls
+            .as_ref()
+            .is_some_and(|calls| !calls.is_empty())
+        {
+            return Ok(Self::ToolCalls { index, delta });
+        }
+
+        Ok(Self::Message { index, delta })
+    }
+}
+
+// Conversation
+
+#[derive(Debug)]
+pub enum ConversationEntry {
+    System {
+        text: String,
+    },
+    UserInput {
+        text: String,
+    },
+    Model {
+        text: Option<String>,
+        refusal: Option<String>,
+        tool_calls: Vec<ToolCall>,
+        finish_reason: FinishReason,
+        usage: Option<Usage>,
+    },
+    ToolOutput {
+        tool_call_id: String,
+        output: String,
+    },
+}
+
+// #[derive(Debug)]
+// pub struct ToolCall {
+//     pub id: String,
+//     pub name: String,
+//     // JSON completo degli argomenti, conservato come stringa.
+//     pub arguments: String,
+// }
+
+#[derive(Default)]
+struct PendingToolCall {
+    id: Option<String>,
+    name: Option<String>,
+    arguments: String,
+}
+
+#[derive(Default)]
+pub struct ChunkAccumulator {
+    text: Option<String>,
+    refusal: Option<String>,
+    tools: std::collections::BTreeMap<u32, PendingToolCall>,
+    finish_reason: Option<FinishReason>,
+    usage: Option<Usage>,
+}
+
+impl ChunkAccumulator {
+    pub fn push(&mut self, chunk: ChunkResponse) {
+        let delta = match chunk {
+            ChunkResponse::Message { delta, .. }
+            | ChunkResponse::ToolCalls { delta, .. } => delta,
+
+            ChunkResponse::Finished { reason, delta, .. } => {
+                self.finish_reason = Some(reason);
+                delta
+            }
+
+            ChunkResponse::Usage { usage } => {
+                self.usage = Some(usage);
+                return;
+            }
+        };
+
+        append(&mut self.text, delta.content);
+        append(&mut self.refusal, delta.refusal);
+
+        for call in delta.tool_calls.unwrap_or_default() {
+            let tool = self.tools.entry(call.index).or_default();
+
+            if let Some(id) = call.id {
+                tool.id = Some(id);
+            }
+
+            if let Some(function) = call.function {
+                if let Some(name) = function.name {
+                    tool.name = Some(name);
+                }
+
+                if let Some(arguments) = function.arguments {
+                    tool.arguments.push_str(&arguments);
+                }
+            }
+        }
     }
 
-    #[test]
-    fn accumulates_text_usage_and_multiple_tool_calls() {
-        let chunks = [
-            r#"{"choices":[{"delta":{"content":"I ","tool_calls":[{"index":0,"id":"call_1","function":{"name":"read_","arguments":"{\"path\":\""}},{"index":1,"id":"call_2","function":{"name":"ls","arguments":"{\"path\":\""}}]}}]}"#,
-            r#"{"choices":[{"delta":{"content":"found","tool_calls":[{"index":0,"function":{"name":"file","arguments":"src/main.rs\"}"}},{"index":1,"function":{"arguments":"src\"}"}}]}}]}"#,
-            r#"{"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"completion_tokens":12}}"#,
-        ];
-        let mut accumulator = TurnAccumulator::default();
-        let mut events = Vec::new();
+    pub fn finish(self) -> Result<ConversationEntry> {
+        let finish_reason = self
+            .finish_reason
+            .context("Risposta incompleta: manca finish_reason")?;
 
-        for chunk in chunks {
-            let response =
-                decode_chunk(chunk).unwrap_or_else(|error| panic!("invalid JSON: {error}"));
-            events.extend(accumulator.apply(response));
-        }
+        let tool_calls = self.tools.into_values()
+            .map(|tool| {
+                Ok(ToolCall {
+                    id: tool.id.context("Tool senza ID")?,
+                    name: tool.name.context("Tool senza nome")?,
+                    arguments: tool.arguments,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
 
-        assert!(matches!(events[0], Delta::Text(ref text) if text == "I "));
-        assert!(matches!(events[1], Delta::ToolCallStarted { ref name } if name == "read_"));
-        assert!(matches!(events[2], Delta::ToolCallStarted { ref name } if name == "ls"));
-        assert!(matches!(events[3], Delta::Text(ref text) if text == "found"));
+        Ok(ConversationEntry::Model {
+            text: self.text,
+            refusal: self.refusal,
+            tool_calls,
+            finish_reason,
+            usage: self.usage,
+        })
+    }
+}
 
-        match accumulator.finish() {
-            Ok(AssistantTurn::ToolCalls {
-                text,
-                calls,
-                completion_tokens,
-            }) => {
-                assert_eq!(text, "I found");
-                assert_eq!(completion_tokens, Some(12));
-                assert_eq!(calls.len(), 2);
-                assert_eq!(calls[0].id, "call_1");
-                assert_eq!(calls[0].name, "read_file");
-                assert_eq!(calls[0].arguments, r#"{"path":"src/main.rs"}"#);
-                assert_eq!(calls[1].id, "call_2");
-                assert_eq!(calls[1].name, "ls");
-                assert_eq!(calls[1].arguments, r#"{"path":"src"}"#);
-            }
-            Ok(AssistantTurn::Completed { .. }) => panic!("missing tool calls"),
-            Err(error) => panic!("incomplete stream: {error}"),
-        }
+fn append(target: &mut Option<String>, fragment: Option<String>) {
+    if let Some(fragment) = fragment {
+        target.get_or_insert_with(String::new).push_str(&fragment);
     }
 }

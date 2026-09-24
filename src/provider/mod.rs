@@ -1,15 +1,10 @@
 pub mod openai;
 
-use crate::{conversation_entry::ConversationEntry, message::AssistantTurn, tools::ToolSpec};
+use crate::{provider::openai::{ChunkResponse, ConversationEntry}, tools::ToolSpec};
 
 pub struct TurnRequest<'a> {
     pub messages: &'a [ConversationEntry],
     pub tools: &'a [ToolSpec],
-}
-
-pub enum Delta {
-    Text(String),
-    ToolCallStarted { name: String },
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -31,6 +26,6 @@ pub trait LlmClient: Send + Sync {
     async fn send(
         &self,
         req: TurnRequest<'_>,
-        on_delta: &mut (dyn FnMut(Delta) + Send),
-    ) -> Result<AssistantTurn, LlmError>;
+        on_delta: &mut (dyn FnMut(ChunkResponse) + Send),
+    ) -> anyhow::Result<openai::ConversationEntry>;
 }

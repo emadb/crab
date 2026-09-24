@@ -1,12 +1,9 @@
 use serde_json::json;
+use std::collections::BTreeMap;
+use anyhow::{Context, Result};
 
 use crate::{
-    context::Conversation,
-    error::AgentError,
-    message::{AssistantTurn, ToolResult},
-    provider::{Delta, LlmClient, TurnRequest},
-    tools::registry::ToolRegistry,
-    ui::{AgentEvent, Ui},
+    context::Conversation, conversation_entry, error::AgentError, message::{AssistantTurn, ToolResult}, provider::{LlmClient, TurnRequest}, tools::registry::ToolRegistry, ui::{AgentEvent, Ui},
 };
 
 pub struct Agent {
@@ -63,7 +60,7 @@ impl Agent {
         &self,
         conversation: &mut Conversation,
         input: &str,
-    ) -> Result<(), AgentError> {
+    ) -> Result<()> {
         if conversation.needs_compression() {
             // TODO: manage error
             let _ = self.compact_conversation(conversation).await;
@@ -74,7 +71,6 @@ impl Agent {
         for _ in 0..self.max_iterations {
             let turn = self.request_turn(conversation).await?;
 
-            let completed = matches!(turn, AssistantTurn::Completed { .. });
             let pending = conversation.push_assistant(turn);
 
             if completed {
@@ -145,20 +141,20 @@ impl Agent {
         Ok(())
     }
 
-    async fn request_turn(&self, conversation: &Conversation) -> Result<AssistantTurn, AgentError> {
+    async fn request_turn(&self, conversation: &Conversation) -> Result<crate::provider::openai::ConversationEntry> {
         let specs = self.tools.specs();
         let request = TurnRequest {
             messages: conversation.messages.as_slice(),
             tools: &specs,
         };
         let ui = &self.ui;
-        let mut on_delta = |delta: Delta| {
-            ui.emit(match delta {
-                Delta::Text(text) => AgentEvent::TextDelta(text),
-                Delta::ToolCallStarted { name } => AgentEvent::ToolStarted { name },
-            });
+        let mut on_delta = |delta: crate::provider::openai::ChunkResponse| {
+            // ui.emit(match delta {
+            //     Delta::Text(text) => AgentEvent::TextDelta(text),
+            //     Delta::ToolCallStarted { name } => AgentEvent::ToolStarted { name },
+            // });
         };
-
-        Ok(self.llm.send(request, &mut on_delta).await?)
+        let conversation_entry = self.llm.send(request, &mut on_delta).await?;
+        Ok()
     }
 }
