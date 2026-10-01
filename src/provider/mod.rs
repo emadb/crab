@@ -1,4 +1,5 @@
 pub mod openai;
+mod turn_accumulator;
 
 use crate::{conversation_entry::ConversationEntry, message::AssistantTurn, tools::ToolSpec};
 

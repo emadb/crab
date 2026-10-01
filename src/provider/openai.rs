@@ -1,10 +1,8 @@
 use crate::{
-    message::{AssistantTurn, Message, ToolCall},
-    provider::{Delta, LlmClient, LlmError, TurnRequest},
-    tools::ToolSpec,
+    message::{AssistantTurn, Message}, provider::{Delta, LlmClient, LlmError, TurnRequest, turn_accumulator::TurnAccumulator}, tools::ToolSpec,
 };
 use reqwest_sse::EventSource;
-use serde::{Deserialize, Serialize};
+use serde::{Serialize};
 
 use tokio_stream::StreamExt;
 
@@ -48,38 +46,6 @@ struct WireFunction {
     arguments: String,
 }
 
-#[derive(Deserialize, Debug)]
-struct DeltaChunk {
-    content: Option<String>,
-    tool_calls: Option<Vec<ToolCallChunk>>,
-}
-
-#[derive(Deserialize, Debug)]
-struct ToolCallChunk {
-    index: usize,
-    id: Option<String>,
-    function: Option<FunctionChunk>,
-}
-
-#[derive(Deserialize, Debug)]
-struct FunctionChunk {
-    name: Option<String>,
-    #[serde(default)]
-    arguments: String,
-}
-
-#[derive(Deserialize, Debug)]
-struct ChunkChoice {
-    delta: DeltaChunk,
-    finish_reason: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct ChunkResponse {
-    choices: Vec<ChunkChoice>,
-    usage: Option<UsageInfo>,
-}
-
 #[derive(serde::Deserialize, Debug)]
 pub struct UsageInfo {
     // pub prompt_tokens: usize,
@@ -87,92 +53,7 @@ pub struct UsageInfo {
     pub completion_tokens: usize,
 }
 
-#[derive(Default)]
-struct TurnAccumulator {
-    text: String,
-    calls: Vec<ToolCall>,
-    usage: Option<UsageInfo>,
-    finished: bool,
-}
-
-impl TurnAccumulator {
-    fn apply(&mut self, response: ChunkResponse) -> Vec<Delta> {
-        if response.usage.is_some() {
-            self.usage = response.usage;
-        }
-
-        let mut events = Vec::new();
-        for choice in response.choices {
-            self.finished |= choice.finish_reason.is_some();
-            events.extend(self.apply_delta(choice.delta));
-        }
-
-        events
-    }
-
-    fn apply_delta(&mut self, delta: DeltaChunk) -> Vec<Delta> {
-        let mut events = Vec::new();
-
-        if let Some(text) = delta.content {
-            self.text.push_str(&text);
-            events.push(Delta::Text(text));
-        }
-
-        for chunk in delta.tool_calls.unwrap_or_default() {
-            while self.calls.len() <= chunk.index {
-               self.calls.push(empty_call());
-            }
-            let call = &mut self.calls[chunk.index];
-
-            if let Some(id) = chunk.id {
-                call.id = id;
-            }
-
-            if let Some(function) = chunk.function {
-                if let Some(name) = function.name {
-                    if call.name.is_empty() {
-                        events.push(Delta::ToolCallStarted { name: name.clone() });
-                    }
-                    call.name.push_str(&name);
-                }
-                call.arguments.push_str(&function.arguments);
-            }
-        }
-
-        events
-    }
-
-    fn finish(self) -> Result<AssistantTurn, LlmError> {
-        if !self.finished {
-            return Err(LlmError::IncompleteStream);
-        }
-
-        let completion_tokens = self.usage.map(|usage| usage.completion_tokens);
-
-        Ok(if self.calls.is_empty() {
-            AssistantTurn::Completed {
-                text: self.text,
-                completion_tokens,
-            }
-        } else {
-            AssistantTurn::ToolCalls {
-                text: self.text,
-                calls: self.calls,
-                completion_tokens,
-            }
-        })
-    }
-}
-
-fn empty_call() -> ToolCall {
-    ToolCall {
-        id: String::new(),
-        name: String::new(),
-        arguments: String::new(),
-    }
-}
-
-fn decode_chunk(data: &str) -> Result<ChunkResponse, LlmError> {
+fn decode_chunk(data: &str) -> Result<super::turn_accumulator::ChunkResponse, LlmError> {
     Ok(serde_json::from_str(data)?)
 }
 
@@ -318,62 +199,4 @@ fn tools_json(specs: &[ToolSpec]) -> serde_json::Value {
         })
         .collect();
     serde_json::json!(jtool)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{TurnAccumulator, decode_chunk};
-    use crate::{message::AssistantTurn, provider::Delta};
-
-    #[test]
-    fn rejects_a_stream_without_a_finish_reason() {
-        let accumulator = TurnAccumulator::default();
-
-        assert!(matches!(
-            accumulator.finish(),
-            Err(crate::provider::LlmError::IncompleteStream)
-        ));
-    }
-
-    #[test]
-    fn accumulates_text_usage_and_multiple_tool_calls() {
-        let chunks = [
-            r#"{"choices":[{"delta":{"content":"I ","tool_calls":[{"index":0,"id":"call_1","function":{"name":"read_","arguments":"{\"path\":\""}},{"index":1,"id":"call_2","function":{"name":"ls","arguments":"{\"path\":\""}}]}}]}"#,
-            r#"{"choices":[{"delta":{"content":"found","tool_calls":[{"index":0,"function":{"name":"file","arguments":"src/main.rs\"}"}},{"index":1,"function":{"arguments":"src\"}"}}]}}]}"#,
-            r#"{"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"completion_tokens":12}}"#,
-        ];
-        let mut accumulator = TurnAccumulator::default();
-        let mut events = Vec::new();
-
-        for chunk in chunks {
-            let response =
-                decode_chunk(chunk).unwrap_or_else(|error| panic!("invalid JSON: {error}"));
-            events.extend(accumulator.apply(response));
-        }
-
-        assert!(matches!(events[0], Delta::Text(ref text) if text == "I "));
-        assert!(matches!(events[1], Delta::ToolCallStarted { ref name } if name == "read_"));
-        assert!(matches!(events[2], Delta::ToolCallStarted { ref name } if name == "ls"));
-        assert!(matches!(events[3], Delta::Text(ref text) if text == "found"));
-
-        match accumulator.finish() {
-            Ok(AssistantTurn::ToolCalls {
-                text,
-                calls,
-                completion_tokens,
-            }) => {
-                assert_eq!(text, "I found");
-                assert_eq!(completion_tokens, Some(12));
-                assert_eq!(calls.len(), 2);
-                assert_eq!(calls[0].id, "call_1");
-                assert_eq!(calls[0].name, "read_file");
-                assert_eq!(calls[0].arguments, r#"{"path":"src/main.rs"}"#);
-                assert_eq!(calls[1].id, "call_2");
-                assert_eq!(calls[1].name, "ls");
-                assert_eq!(calls[1].arguments, r#"{"path":"src"}"#);
-            }
-            Ok(AssistantTurn::Completed { .. }) => panic!("missing tool calls"),
-            Err(error) => panic!("incomplete stream: {error}"),
-        }
-    }
 }

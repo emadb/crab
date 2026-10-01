@@ -75,14 +75,14 @@ impl Agent {
             let turn = self.request_turn(conversation).await?;
 
             let completed = matches!(turn, AssistantTurn::Completed { .. });
-            let pending = conversation.push_assistant(turn);
+            let pending_calls = conversation.push_assistant(turn);
 
             if completed {
                 self.ui.emit(AgentEvent::TurnEnded);
                 return Ok(());
             }
 
-            for call in pending {
+            for call in pending_calls {
                 let args = serde_json::from_str(call.arguments());
                 let args = args.unwrap_or(json!({"error": "Error parsing the arguments."}));
                 self.ui.emit(AgentEvent::ToolExecutionStarted {

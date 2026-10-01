@@ -65,7 +65,7 @@ impl Conversation {
                 calls,
                 completion_tokens,
             } => {
-                let pending: Vec<PendingCall> = calls
+                let pending_calls: Vec<PendingCall> = calls
                     .iter()
                     .map(|c| PendingCall {
                         id: c.id.clone(),
@@ -78,7 +78,7 @@ impl Conversation {
                 }
                 let ce = ConversationEntry::agent(text.clone(), calls, completion_tokens);
                 self.messages.push(ce);
-                pending
+                pending_calls
             }
         }
     }
